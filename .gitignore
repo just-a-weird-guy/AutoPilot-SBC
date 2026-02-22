@@ -1,0 +1,14 @@
+# Runtime/editor noise
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+.vscode/
+.idea/
+
+# Local captures and replay/debug tooling (not for repo)
+data/
+scripts/
+backup-project.ps1
+AGENT.md
