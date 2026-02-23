@@ -62,11 +62,12 @@ AutopilotSBC is a Chrome extension that helps you complete SBCs faster in the EA
   - Exclude special
   - Include unassigned
 
-## Notes
+## Disclaimer
 
-- Works only on the EA FC Ultimate Team Web App.
-- This is an unofficial community tool.
-- Use at your own risk.
+AutopilotSBC is an unofficial experimental tool for the EA SPORTS FC Web App.
+It is not affiliated with or endorsed by EA.
+It is intended strictly for personal use.
+Use this tool at your own risk.
 
 ## Privacy
 
