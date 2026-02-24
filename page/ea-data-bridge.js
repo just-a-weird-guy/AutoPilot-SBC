@@ -1809,6 +1809,48 @@
     return raw.map(toPlainChallenge);
   };
 
+  // Fetches a single challenge entity by ID for submission purposes.
+  // Unlike getChallengesBySetIdsRaw this always forces a server refresh
+  // and never filters by completion status, so repeatable-set challenges
+  // are always returned even when the set momentarily appears complete
+  // between repeat cycles.
+  // Falls back to name matching if the ID is not found (EA may
+  // re-instantiate repeat-cycle challenges with new IDs).
+  const getChallengeEntityForSubmission = async (
+    setId,
+    challengeId,
+    challengeName = null,
+  ) => {
+    const { data } = await sbcApiCall(
+      "requestSets",
+      () => observableToPromise(services.SBC.requestSets()),
+      { minGapMs: SBC_AUTOMATION_MIN_GAP_MS, maxAttempts: 2 },
+    );
+    const sets = (data?.sets ?? []).filter((s) => s.id === setId);
+    for (const set of sets) {
+      await sbcApiCall(
+        "requestChallengesForSet",
+        () => observableToPromise(services.SBC.requestChallengesForSet(set)),
+        { minGapMs: SBC_AUTOMATION_MIN_GAP_MS, maxAttempts: 2 },
+      );
+    }
+    const challenges = sets.flatMap((s) => s.getChallenges?.() ?? []);
+    // Prefer exact ID match.
+    const byId =
+      challenges.find((c) => String(c?.id) === String(challengeId)) ?? null;
+    if (byId) return byId;
+    // Fallback: match by name (EA may re-instantiate repeatable challenges
+    // with fresh IDs between cycles).
+    if (challengeName) {
+      const byName =
+        challenges.find(
+          (c) => (c?.name ?? c?.title) === challengeName && !c.isCompleted?.(),
+        ) ?? null;
+      if (byName) return byName;
+    }
+    return null;
+  };
+
   const toChallengePayload = (challenge) => {
     if (!challenge) return null;
     return {
@@ -10851,18 +10893,14 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 ? `(Cycle ${batch.cycleIndex}) (${i + 1}/${batchEntries.length}) Loading ${challengeName}...`
                 : `(${i + 1}/${batchEntries.length}) Loading ${challengeName}...`,
             );
-            const rawChallenges = await getChallengesBySetIdsRaw([
+            const challengeEntity = await getChallengeEntityForSubmission(
               startedSetId,
-            ]);
-            const challengeEntity = (
-              Array.isArray(rawChallenges) ? rawChallenges : []
-            ).find(
-              (challenge) =>
-                String(challenge?.id) === String(entry?.challengeId),
+              entry?.challengeId,
+              entry?.challengeName ?? null,
             );
             if (!challengeEntity) {
               console.warn(
-                `[EA Data] startSubmitting skipped ${challengeName} because challengeEntity was missing from rawChallenges`,
+                `[EA Data] startSubmitting skipped ${challengeName} because challenge entity was not found after server refresh`,
               );
               entry.submitState = "skipped";
               entry.reason = "Already completed or unavailable.";
@@ -11186,6 +11224,16 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 postError,
               );
             }
+          }
+
+          // Allow the EA backend time to process the repeat reset before
+          // fetching challenges for the next cycle.
+          if (
+            multiSetEnabled &&
+            c < cycleBatches.length - 1 &&
+            !setSolveOverlayState.abortRequested
+          ) {
+            await delayMs(jitterMs(2000, 0.3));
           }
         }
 
