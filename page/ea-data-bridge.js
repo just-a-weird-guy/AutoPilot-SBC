@@ -2731,23 +2731,44 @@
   cursor: pointer !important;
   flex: 1 1 auto;
   min-width: 0;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.12s;
 }
 .ea-data-solve-button:hover {
-  background: #b92f2f !important;
-  border-color: #b92f2f !important;
+  background: #c23232 !important;
+  border-color: #c23232 !important;
+  box-shadow: 0 2px 8px rgba(213, 59, 59, 0.35);
+  transform: translateY(-1px);
+}
+.ea-data-solve-button:focus-visible {
+  background: #c23232 !important;
+  border-color: #c23232 !important;
+  box-shadow: 0 0 0 2px rgba(213, 59, 59, 0.55);
 }
 .ea-data-solve-button:active {
   background: #a62828 !important;
   border-color: #a62828 !important;
+  box-shadow: none;
+  transform: translateY(0);
 }
 .ea-data-solve-wrapper {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 10px;
   width: 100%;
   box-sizing: border-box;
+}
+.ea-data-solve-wrapper .ea-data-solve-button {
+  flex: 1 0 100%;
+}
+.ea-data-solve-wrapper__secondary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  justify-content: center;
 }
 .ea-data-settings-button {
   width: 42px;
@@ -2762,46 +2783,93 @@
   align-items: center;
   justify-content: center;
   padding: 0;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s;
 }
 .ea-data-settings-button:hover {
-  background: rgba(255, 255, 255, 0.10);
-  border-color: rgba(255, 255, 255, 0.30);
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(100, 180, 255, 0.40);
+  transform: translateY(-1px);
+}
+.ea-data-settings-button:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(100, 180, 255, 0.40);
+  box-shadow: 0 0 0 2px rgba(100, 180, 255, 0.50);
 }
 .ea-data-settings-button:active {
-  transform: translateY(1px);
+  transform: translateY(0);
 }
 .ea-data-settings-button svg {
   width: 18px;
   height: 18px;
   display: block;
   fill: currentColor;
+  transition: transform 0.3s ease;
+}
+.ea-data-settings-button:hover svg {
+  transform: rotate(60deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ea-data-settings-button { transition: none !important; }
+  .ea-data-settings-button svg { transition: none !important; }
+  .ea-data-settings-button:hover svg { transform: none !important; }
 }
 .ea-data-multisolve-button {
   height: 40px;
   min-width: 72px;
-  padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  padding: 0 16px;
+  border: 1px solid rgba(100, 180, 255, 0.35);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.92);
+  background: rgba(80, 160, 255, 0.10);
+  color: rgba(200, 225, 255, 0.95);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   font-weight: 800;
   letter-spacing: 0.2px;
   font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  flex: 1 1 auto;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s;
 }
 .ea-data-multisolve-button:not(:disabled):hover {
-  background: rgba(255, 255, 255, 0.10);
-  border-color: rgba(255, 255, 255, 0.30);
+  background: rgba(80, 160, 255, 0.18);
+  border-color: rgba(100, 180, 255, 0.55);
+  transform: translateY(-1px);
+}
+.ea-data-multisolve-button:not(:disabled):focus-visible {
+  background: rgba(80, 160, 255, 0.18);
+  border-color: rgba(100, 180, 255, 0.55);
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 2px rgba(100, 180, 255, 0.50);
 }
 .ea-data-multisolve-button:not(:disabled):active {
-  transform: translateY(1px);
+  transform: translateY(0);
 }
 .ea-data-multisolve-button:disabled {
-  opacity: 0.45;
+  opacity: 0.40;
   cursor: not-allowed;
+}
+.ea-data-multisolve-button__icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  transition: transform 0.35s ease;
+}
+.ea-data-multisolve-button:not(:disabled):hover .ea-data-multisolve-button__icon,
+.ea-data-multisolve-button:not(:disabled):focus-visible .ea-data-multisolve-button__icon {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ea-data-multisolve-button { transition: none !important; }
+  .ea-data-multisolve-button__icon { transition: none !important; }
+  .ea-data-multisolve-button:not(:disabled):hover .ea-data-multisolve-button__icon,
+  .ea-data-multisolve-button:not(:disabled):focus-visible .ea-data-multisolve-button__icon {
+    transform: none !important;
+  }
 }
 .ea-data-setsolve-button {
   height: 40px;
@@ -12218,8 +12286,37 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const multiSolveButton = document.createElement("button");
     multiSolveButton.type = "button";
     multiSolveButton.className = "ea-data-multisolve-button";
-    multiSolveButton.textContent = "Multi";
-    multiSolveButton.setAttribute("aria-label", "Solve multiple times");
+    const multiSolveIcon = document.createElement("span");
+    multiSolveIcon.className = "ea-data-multisolve-button__icon";
+    multiSolveIcon.setAttribute("aria-hidden", "true");
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2.2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("width", "14");
+    svg.setAttribute("height", "14");
+    for (const d of [
+      "M17 1l4 4-4 4",
+      "M3 11V9a4 4 0 0 1 4-4h14",
+      "M7 23l-4-4 4-4",
+      "M21 13v2a4 4 0 0 1-4 4H3",
+    ]) {
+      const p = document.createElementNS(svgNS, "path");
+      p.setAttribute("d", d);
+      svg.appendChild(p);
+    }
+    multiSolveIcon.appendChild(svg);
+    const multiSolveLabel = document.createElement("span");
+    multiSolveLabel.textContent = "Multi Solve";
+    multiSolveButton.append(multiSolveIcon, multiSolveLabel);
+    multiSolveButton.setAttribute(
+      "aria-label",
+      "Multi Solve (repeat challenge submissions)",
+    );
     multiSolveButton.addEventListener("click", async (event) => {
       try {
         event.preventDefault();
@@ -12232,9 +12329,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       challenge ?? currentChallenge,
     );
 
+    const secondaryRow = document.createElement("div");
+    secondaryRow.className = "ea-data-solve-wrapper__secondary";
+    secondaryRow.append(multiSolveButton, settingsButton);
     wrapper.append(button);
-    wrapper.append(multiSolveButton);
-    wrapper.append(settingsButton);
+    wrapper.append(secondaryRow);
     root.append(wrapper);
 
     view.__eaDataSolveWrapper = wrapper;
