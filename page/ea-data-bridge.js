@@ -1809,6 +1809,201 @@
     return raw.map(toPlainChallenge);
   };
 
+  const sortSetChallengesForSolver = (list) => {
+    const challenges = Array.isArray(list) ? list.filter(Boolean) : [];
+    const incomplete = challenges.filter(
+      (c) => c?.status !== "COMPLETED" && !Boolean(c?.isCompleted?.()),
+    );
+    return incomplete.sort((a, b) => {
+      const an = String(a?.name ?? "");
+      const bn = String(b?.name ?? "");
+      const cmp = an.localeCompare(bn);
+      if (cmp) return cmp;
+      return (readNumeric(a?.id) ?? 0) - (readNumeric(b?.id) ?? 0);
+    });
+  };
+
+  const SET_CHALLENGE_INFO_PREFETCH_TTL_MS = 45 * 1000;
+  const setChallengeInfoPrefetchCacheBySetId = new Map();
+  const setChallengeInfoPrefetchInFlightBySetId = new Map();
+
+  const normalizeSetIdKey = (setId) => {
+    const numeric = readNumeric(setId);
+    return numeric == null ? null : String(numeric);
+  };
+
+  const getSetChallengeInfoPrefetchEntry = (
+    setId,
+    { ttlMs = SET_CHALLENGE_INFO_PREFETCH_TTL_MS } = {},
+  ) => {
+    const key = normalizeSetIdKey(setId);
+    if (!key) return null;
+    const cached = setChallengeInfoPrefetchCacheBySetId.get(key) ?? null;
+    if (!cached) return null;
+    if (Date.now() - (cached.at ?? 0) > Math.max(1000, ttlMs)) return null;
+    return cached;
+  };
+
+  const getPrefetchedSetChallenges = (
+    setId,
+    { ttlMs = SET_CHALLENGE_INFO_PREFETCH_TTL_MS } = {},
+  ) => {
+    const entry = getSetChallengeInfoPrefetchEntry(setId, { ttlMs });
+    return Array.isArray(entry?.challenges) ? entry.challenges : null;
+  };
+
+  const getPrefetchedSetRequirementsByChallengeId = (
+    setId,
+    { ttlMs = SET_CHALLENGE_INFO_PREFETCH_TTL_MS } = {},
+  ) => {
+    const entry = getSetChallengeInfoPrefetchEntry(setId, { ttlMs });
+    return entry?.requirementsByChallengeId instanceof Map
+      ? entry.requirementsByChallengeId
+      : null;
+  };
+
+  const clearSetChallengeInfoPrefetchCache = (setId = null) => {
+    const key = normalizeSetIdKey(setId);
+    if (key) {
+      setChallengeInfoPrefetchCacheBySetId.delete(key);
+      setChallengeInfoPrefetchInFlightBySetId.delete(key);
+      return;
+    }
+    setChallengeInfoPrefetchCacheBySetId.clear();
+    setChallengeInfoPrefetchInFlightBySetId.clear();
+  };
+
+  const upsertPrefetchedSetChallenges = (setId, challenges) => {
+    const key = normalizeSetIdKey(setId);
+    const normalizedSetId = readNumeric(setId);
+    if (!key || normalizedSetId == null) return;
+    const existing = setChallengeInfoPrefetchCacheBySetId.get(key) ?? null;
+    const nextChallenges = Array.isArray(challenges) ? challenges : [];
+    const requirementsByChallengeId =
+      existing?.requirementsByChallengeId instanceof Map
+        ? existing.requirementsByChallengeId
+        : new Map();
+    setChallengeInfoPrefetchCacheBySetId.set(key, {
+      at: Date.now(),
+      reason: existing?.reason ?? "upsert",
+      setId: normalizedSetId,
+      challenges: nextChallenges,
+      requirementsByChallengeId,
+    });
+  };
+
+  const upsertPrefetchedSetRequirement = (setId, challengeId, value) => {
+    const key = normalizeSetIdKey(setId);
+    const normalizedSetId = readNumeric(setId);
+    const challengeKey = challengeId == null ? null : String(challengeId);
+    if (!key || normalizedSetId == null || !challengeKey) return;
+    const existing = setChallengeInfoPrefetchCacheBySetId.get(key) ?? null;
+    const requirementsByChallengeId =
+      existing?.requirementsByChallengeId instanceof Map
+        ? new Map(existing.requirementsByChallengeId)
+        : new Map();
+    requirementsByChallengeId.set(challengeKey, value);
+    setChallengeInfoPrefetchCacheBySetId.set(key, {
+      at: Date.now(),
+      reason: existing?.reason ?? "upsert",
+      setId: normalizedSetId,
+      challenges: Array.isArray(existing?.challenges) ? existing.challenges : [],
+      requirementsByChallengeId,
+    });
+  };
+
+  const prefetchSetChallengeInfo = async (
+    setId,
+    { reason = "unknown", force = false } = {},
+  ) => {
+    const key = normalizeSetIdKey(setId);
+    const normalizedSetId = readNumeric(setId);
+    if (!key || normalizedSetId == null) {
+      return {
+        setId: null,
+        challenges: [],
+        requirementsByChallengeId: new Map(),
+        fromCache: false,
+      };
+    }
+
+    if (!force) {
+      const cached = getSetChallengeInfoPrefetchEntry(normalizedSetId);
+      if (cached) {
+        return {
+          setId: normalizedSetId,
+          challenges: Array.isArray(cached?.challenges) ? cached.challenges : [],
+          requirementsByChallengeId:
+            cached?.requirementsByChallengeId instanceof Map
+              ? cached.requirementsByChallengeId
+              : new Map(),
+          fromCache: true,
+        };
+      }
+      const inFlight = setChallengeInfoPrefetchInFlightBySetId.get(key) ?? null;
+      if (inFlight) return inFlight;
+    }
+
+    const promise = (async () => {
+      const rawChallenges = await getChallengesBySetIdsRaw([normalizedSetId]);
+      const challenges = sortSetChallengesForSolver(rawChallenges);
+      upsertPrefetchedSetChallenges(normalizedSetId, challenges);
+      const requirementsByChallengeId = new Map();
+
+      for (const challenge of challenges) {
+        const challengeId = challenge?.id == null ? null : String(challenge.id);
+        if (!challengeId) continue;
+        const challengeName =
+          challenge?.name ?? challenge?.title ?? `Challenge ${challengeId}`;
+        let snapshot = buildRequirementsSnapshot(challenge, null);
+        let source = "snapshot-local";
+        try {
+          const loaded = await loadChallenge(challenge, true, { force: true });
+          snapshot = buildRequirementsSnapshot(challenge, loaded?.data ?? loaded);
+          source = "snapshot-loaded";
+        } catch {}
+        requirementsByChallengeId.set(challengeId, {
+          challengeId,
+          challengeName,
+          snapshot,
+          source,
+          status: "ready",
+          updatedAt: Date.now(),
+          errorMessage: null,
+        });
+        upsertPrefetchedSetRequirement(normalizedSetId, challengeId, {
+          challengeId,
+          challengeName,
+          snapshot,
+          source,
+          status: "ready",
+          updatedAt: Date.now(),
+          errorMessage: null,
+        });
+      }
+
+      const cacheEntry = {
+        at: Date.now(),
+        reason,
+        setId: normalizedSetId,
+        challenges,
+        requirementsByChallengeId,
+      };
+      setChallengeInfoPrefetchCacheBySetId.set(key, cacheEntry);
+      return {
+        setId: normalizedSetId,
+        challenges,
+        requirementsByChallengeId,
+        fromCache: false,
+      };
+    })().finally(() => {
+      setChallengeInfoPrefetchInFlightBySetId.delete(key);
+    });
+
+    setChallengeInfoPrefetchInFlightBySetId.set(key, promise);
+    return promise;
+  };
+
   // Fetches a single challenge entity by ID for submission purposes.
   // Unlike getChallengesBySetIdsRaw this always forces a server refresh
   // and never filters by completion status, so repeatable-set challenges
@@ -2631,8 +2826,10 @@
   let slotActionPanelHooked = false;
   let appSettingsHooked = false;
   let appSettingsControllerHooked = false;
+  let currencyNavBarHooked = false;
   let currentChallenge = null;
   let lastOpenedChallengeId = null;
+  let lastOpenedSetId = null;
   let debugEnabled = false;
   const DEBUG_ENABLED_STATE_KEY = "__eaDataDebugEnabled";
   const DEBUG_ENABLED_STORAGE_KEY = "ea-data-debug-enabled";
@@ -2674,6 +2871,7 @@
   const exclusionControlPanels = new Set();
   const globalSettingsStateRegistry = new Set();
   const rewardActionButtonRoots = new Set();
+  const topbarSupportWrapperByView = new WeakMap();
   const solverBridgeRequests = new Map();
   const prefBridgeRequests = new Map();
   // Solve can occasionally take longer (large clubs / chemistry local search).
@@ -2692,8 +2890,32 @@
   const PREF_STORAGE_KEY = "eaData.preferences.v1";
   const PREF_BRIDGE_TIMEOUT_MS = 3500;
   const PREF_CACHE_TTL_MS = 10 * 1000;
+  const EA_DATA_SUPPORT_URL = "https://ko-fi.com/P5P5YOUU7";
+  const EA_DATA_TOPBAR_SUPPORT_WRAP_CLASS = "ea-data-topbar-support-wrap";
+  const EA_DATA_TOPBAR_SUPPORT_BUTTON_CLASS = "ea-data-topbar-support-btn";
+  const EA_DATA_TOPBAR_SUPPORT_SELECTOR = `.${EA_DATA_TOPBAR_SUPPORT_WRAP_CLASS}`;
+  const EA_DATA_TOPBAR_SUPPORT_TOOLTIP_CLASS = "ea-data-topbar-support-tip";
+  const EA_DATA_TOPBAR_SUPPORT_TOOLTIP_ID = "ea-data-topbar-support-tip";
+  const EA_DATA_TOPBAR_SUPPORT_TOOLTIP_VISIBLE_CLASS = "is-visible";
+  const EA_DATA_TOPBAR_SUPPORT_TOOLTIP_TEXT =
+    "If you’re enjoying AutopilotSBC, supporting the project helps me keep improving it and keep offering it for completely free!";
+  const EA_DATA_TOPBAR_SUPPORT_HOVER_DELAY_MS = 650;
+  const EA_DATA_TOPBAR_SUPPORT_FOCUS_DELAY_MS = 350;
   let preferencesCache = null; // { at: number, value: object }
   let preferencesInFlight = null;
+  let topbarSupportObserver = null;
+  let topbarSupportObserverStarted = false;
+  let topbarSupportObserverRoot = null;
+  let topbarSupportDocumentObserver = null;
+  let topbarSupportDocumentObserverStarted = false;
+  let topbarSupportResizeHooked = false;
+  let topbarSupportReflowToken = 0;
+  let topbarSupportReflowRafId = null;
+  let topbarSupportTooltip = null;
+  let topbarSupportTooltipAnchorButton = null;
+  let topbarSupportTooltipTimer = null;
+  let topbarSupportTooltipHideTimer = null;
+  let topbarSupportTooltipViewportListenersAttached = false;
   let loadingOverlayCount = 0;
 
   const ensureSolveButtonStyles = () => {
@@ -2710,7 +2932,8 @@
 .ea-data-preview-sort-select,
 .ea-data-preview-nav-btn,
 .ea-data-times-stepper__btn,
-.ea-data-times-stepper__input {
+.ea-data-times-stepper__input,
+.ea-data-topbar-support-btn {
   font-family: "Segoe UI", Arial, sans-serif !important;
 }
 .ea-data-range__number::-webkit-inner-spin-button,
@@ -2870,6 +3093,147 @@
   .ea-data-multisolve-button:not(:disabled):focus-visible .ea-data-multisolve-button__icon {
     transform: none !important;
   }
+}
+.ea-data-topbar-support-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  margin-left: 0;
+  margin-right: 0;
+  flex: 0 0 auto;
+}
+.ea-data-topbar-support-wrap--anchored {
+  position: fixed;
+  margin: 0 !important;
+  z-index: 4;
+}
+.ea-data-topbar-support-wrap--inline {
+  position: relative !important;
+  margin: 0 !important;
+  left: auto !important;
+  top: auto !important;
+  transform: none !important;
+  z-index: auto;
+}
+.ea-data-topbar-title--with-support {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 24px;
+  white-space: nowrap;
+}
+.ea-data-topbar-support-btn {
+  height: 30px;
+  min-width: 118px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 94, 91, 0.3);
+  border-radius: 999px;
+  background: rgba(255, 94, 91, 0.1);
+  color: rgba(255, 235, 235, 0.95);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.15px;
+  line-height: 1;
+  white-space: nowrap;
+  text-transform: none;
+  box-shadow: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.ea-data-topbar-support-btn::before {
+  content: "\\2665";
+  width: auto;
+  height: auto;
+  margin-right: 7px;
+  color: #ff5e5b;
+  font-size: 11px;
+  line-height: 1;
+  display: inline-block;
+}
+.ea-data-topbar-support-btn:not(:disabled):hover {
+  background: rgba(255, 94, 91, 0.2);
+  border-color: #ff5e5b;
+  color: #ffdede;
+  box-shadow: 0 0 10px rgba(255, 94, 91, 0.2);
+}
+.ea-data-topbar-support-btn:not(:disabled):focus-visible {
+  background: rgba(255, 94, 91, 0.2);
+  border-color: #ff5e5b;
+  color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(255, 94, 91, 0.25);
+}
+.ea-data-topbar-support-btn:not(:disabled):active {
+  background: rgba(255, 94, 91, 0.16);
+}
+.ea-data-topbar-support-tip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -4px);
+  min-width: 230px;
+  max-width: 320px;
+  padding: 10px 12px 11px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 138, 138, 0.22);
+  background: linear-gradient(
+    180deg,
+    rgba(23, 26, 38, 0.94) 0%,
+    rgba(14, 16, 25, 0.94) 100%
+  );
+  color: rgba(255, 243, 243, 0.92);
+  font-family: "Segoe UI", Arial, sans-serif !important;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.34;
+  text-align: center;
+  white-space: normal;
+  letter-spacing: 0.02px;
+  text-wrap: balance;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+  backdrop-filter: blur(2px);
+  box-shadow:
+    0 8px 20px rgba(0, 0, 0, 0.32),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 12000;
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    visibility 0.16s linear;
+}
+.ea-data-topbar-support-tip__text {
+  display: block;
+  font-size: 12.35px;
+  font-weight: 490;
+  letter-spacing: 0.03px;
+  color: rgba(255, 245, 245, 0.92);
+}
+.ea-data-topbar-support-tip::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -6px;
+  width: 10px;
+  height: 10px;
+  border-top: 1px solid rgba(255, 138, 138, 0.22);
+  border-left: 1px solid rgba(255, 138, 138, 0.22);
+  background: rgba(20, 23, 34, 0.94);
+  transform: translateX(-50%) rotate(45deg);
+}
+.ea-data-topbar-support-tip.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ea-data-topbar-support-btn { transition: none !important; }
+  .ea-data-topbar-support-tip { transition: none !important; }
 }
 .ea-data-setsolve-button {
   height: 40px;
@@ -3865,6 +4229,246 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 }
 #ea-data-setsolve-overlay #ea-data-setsolve-cycle-meta {
   text-align: center;
+}
+#ea-data-setsolve-overlay .ea-data-multisolve-modal {
+  width: min(1080px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 14px;
+  overflow: hidden;
+}
+#ea-data-setsolve-overlay #ea-data-setsolve-left-column {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: calc(85vh - 28px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+#ea-data-setsolve-overlay #ea-data-setsolve-right-panel {
+  width: min(340px, 34vw);
+  min-width: 280px;
+  max-height: calc(85vh - 28px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  padding: 10px;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-info-title {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.25px;
+  color: #0b96ff;
+  margin-bottom: 10px;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-info-section {
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.28);
+  padding: 9px 10px;
+  margin-top: 8px;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-info-section:first-of-type {
+  margin-top: 0;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-info-section-title {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.86);
+  margin-bottom: 7px;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 5px;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-info-row:first-of-type {
+  margin-top: 0;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-info-label {
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 11px;
+  font-weight: 700;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-info-value {
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: right;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-card {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 8px 9px;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-card--solved {
+  border-color: rgba(7, 244, 104, 0.5);
+  background: rgba(7, 244, 104, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(7, 244, 104, 0.15);
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-card--failed {
+  border-color: rgba(242, 69, 32, 0.5);
+  background: rgba(242, 69, 32, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(242, 69, 32, 0.18);
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-head-right {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-name {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.95);
+  line-height: 1.25;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-status {
+  font-size: 10px;
+  font-weight: 800;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-status--loading {
+  color: #9ecfff;
+  border-color: rgba(11, 150, 255, 0.42);
+  background: rgba(11, 150, 255, 0.14);
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-status--ready {
+  color: #a0ffc9;
+  border-color: rgba(7, 244, 104, 0.42);
+  background: rgba(7, 244, 104, 0.14);
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-status--error {
+  color: #ffb1b1;
+  border-color: rgba(242, 69, 32, 0.45);
+  background: rgba(242, 69, 32, 0.14);
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-lines {
+  margin: 7px 0 0;
+  padding-left: 15px;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 11px;
+  font-weight: 700;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-lines li {
+  margin-top: 3px;
+  line-height: 1.28;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-lines li:first-child {
+  margin-top: 0;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-lines li.ea-data-setsolve-req-line--blocked {
+  color: #ffd3d3;
+  background: rgba(242, 69, 32, 0.16);
+  border: 1px solid rgba(242, 69, 32, 0.42);
+  border-radius: 6px;
+  padding: 2px 5px;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-badge {
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 3px 7px;
+  white-space: nowrap;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-badge--solver {
+  color: #ffd6a0;
+  border-color: rgba(255, 162, 0, 0.45);
+  background: rgba(255, 162, 0, 0.16);
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-badge--pool {
+  color: #ffb8c6;
+  border-color: rgba(255, 62, 108, 0.48);
+  background: rgba(255, 62, 108, 0.16);
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-badge--system {
+  color: #d4d8ff;
+  border-color: rgba(149, 157, 255, 0.45);
+  background: rgba(149, 157, 255, 0.16);
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-req-badge--solved {
+  color: #b7ffce;
+  border-color: rgba(7, 244, 104, 0.5);
+  background: rgba(7, 244, 104, 0.16);
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-failure-reason {
+  margin-top: 7px;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 212, 212, 0.95);
+  line-height: 1.3;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-hint {
+  margin-top: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.56);
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-empty {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-skeleton {
+  margin-top: 7px;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-skeleton-line {
+  height: 7px;
+  border-radius: 999px;
+  margin-top: 6px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    rgba(255, 255, 255, 0.18) 45%,
+    rgba(255, 255, 255, 0.06) 100%
+  );
+  background-size: 220% 100%;
+  animation: ea-data-setsolve-shimmer 1.2s ease-in-out infinite;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-skeleton-line:nth-child(1) {
+  width: 88%;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-skeleton-line:nth-child(2) {
+  width: 70%;
+}
+#ea-data-setsolve-overlay .ea-data-setsolve-skeleton-line:nth-child(3) {
+  width: 80%;
+}
+@keyframes ea-data-setsolve-shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 100% 50%;
+  }
 }
 .ea-data-progress {
   margin-top: 8px;
@@ -6135,6 +6739,15 @@ input.ea-data-range__input:disabled::-moz-range-progress {
   let setSolveOverlayState = {
     selectedChallengeIds: null,
     availableChallenges: [],
+    requestedSetCyclesInput: 1,
+    requirementsByChallengeId: new Map(),
+    requirementsLoadToken: 0,
+    requirementsInFlight: new Set(),
+    rightPanelInitialized: false,
+    rightPanelLastSetId: null,
+    failureByChallengeId: new Map(),
+    latestFailureContext: null,
+    generationStopReason: null,
   };
   let setSolveOverlayKeyHandlerBound = false;
 
@@ -7985,7 +8598,6 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         setStatus("Fetching players...");
         const payload = await window.eaData.getSolverPayload({
           ignoreLoaned: true,
-          forcePlayersFetch: true,
         });
         if (currentChallenge?.id !== startedChallengeId) {
           setStatus("");
@@ -8481,6 +9093,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     overlay.style.fontFamily = '"Segoe UI", Arial, sans-serif';
     overlay.innerHTML = `
       <div class="ea-data-multisolve-modal" role="dialog" aria-modal="true" aria-labelledby="ea-data-setsolve-title">
+        <div id="ea-data-setsolve-left-column">
         <div class="ea-data-settings-header">
           <div class="ea-data-settings-title" id="ea-data-setsolve-title">Solve Entire Set</div>
           <button type="button" class="ea-data-settings-close" aria-label="Close set solve" data-action="close">x</button>
@@ -8572,6 +9185,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             <button type="button" class="ea-data-btn ea-data-btn--success" data-action="start" disabled>Start Submitting</button>
           </div>
         </div>
+        </div>
+        <aside id="ea-data-setsolve-right-panel" aria-live="polite">
+          <div class="ea-data-setsolve-empty">Loading set details...</div>
+        </aside>
       </div>
     `;
 
@@ -8581,6 +9198,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const challengePickerWrap = overlay.querySelector(
       "#ea-data-setsolve-challenge-picker",
     );
+    const rightPanelWrap = overlay.querySelector("#ea-data-setsolve-right-panel");
     const closeBtn = overlay.querySelector('[data-action="close"]');
     const cancelBtn = overlay.querySelector('[data-action="cancel"]');
     const generateBtn = overlay.querySelector('[data-action="generate"]');
@@ -8650,6 +9268,846 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       }
     };
 
+    const ensureSetSolveRightPanelState = () => {
+      if (!setSolveOverlayState) return;
+      const requestedCycles = clampInt(
+        setSolveOverlayState?.requestedSetCycles ?? 1,
+        1,
+        50,
+      );
+      if (readNumeric(setSolveOverlayState?.requestedSetCyclesInput) == null) {
+        setSolveOverlayState.requestedSetCyclesInput =
+          requestedCycles == null ? 1 : requestedCycles;
+      }
+      if (!(setSolveOverlayState.requirementsByChallengeId instanceof Map)) {
+        setSolveOverlayState.requirementsByChallengeId = new Map();
+      }
+      if (!(setSolveOverlayState.requirementsInFlight instanceof Set)) {
+        setSolveOverlayState.requirementsInFlight = new Set();
+      }
+      const token = Number(setSolveOverlayState.requirementsLoadToken);
+      if (!Number.isFinite(token)) {
+        setSolveOverlayState.requirementsLoadToken = 0;
+      }
+      if (typeof setSolveOverlayState.rightPanelInitialized !== "boolean") {
+        setSolveOverlayState.rightPanelInitialized = false;
+      }
+      if (!("rightPanelLastSetId" in setSolveOverlayState)) {
+        setSolveOverlayState.rightPanelLastSetId = null;
+      }
+      if (!(setSolveOverlayState.failureByChallengeId instanceof Map)) {
+        setSolveOverlayState.failureByChallengeId = new Map();
+      }
+      if (!("latestFailureContext" in setSolveOverlayState)) {
+        setSolveOverlayState.latestFailureContext = null;
+      }
+      if (!("generationStopReason" in setSolveOverlayState)) {
+        setSolveOverlayState.generationStopReason = null;
+      }
+    };
+
+    const normalizeFailureToken = (value) => {
+      if (value == null) return null;
+      const numeric = readNumeric(value);
+      if (numeric != null) return String(numeric);
+      const text = String(value).trim().toLowerCase().replace(/\s+/g, " ");
+      return text || null;
+    };
+
+    const collectFailureValueTokens = (value, out = []) => {
+      if (value == null) return out;
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          collectFailureValueTokens(item, out);
+        }
+        return out;
+      }
+      if (value instanceof Set) {
+        for (const item of Array.from(value)) {
+          collectFailureValueTokens(item, out);
+        }
+        return out;
+      }
+      if (typeof value === "object") {
+        const directId = readNumeric(
+          value?.id ?? value?.itemId ?? value?.playerId ?? null,
+        );
+        if (directId != null) {
+          out.push(String(directId));
+          return out;
+        }
+        for (const key of Object.keys(value)) {
+          collectFailureValueTokens(value[key], out);
+        }
+        return out;
+      }
+      const token = normalizeFailureToken(value);
+      if (token) out.push(token);
+      return out;
+    };
+
+    const normalizeFailureRuleKey = (rule) => {
+      if (rule == null) return null;
+      if (
+        typeof rule === "string" ||
+        typeof rule === "number" ||
+        typeof rule === "boolean"
+      ) {
+        const token = normalizeFailureToken(rule);
+        return token ? `text:${token}` : null;
+      }
+      if (typeof rule !== "object") return null;
+      const type =
+        normalizeFailureToken(
+          rule?.type ??
+            rule?.keyNameNormalized ??
+            rule?.keyName ??
+            rule?.requirementType ??
+            rule?.attribute ??
+            null,
+        ) ?? "unknown";
+      const op = normalizeFailureToken(rule?.op ?? rule?.scopeName ?? null);
+      const key = normalizeFailureToken(
+        rule?.keyNameNormalized ?? rule?.keyName ?? rule?.key ?? null,
+      );
+      const target = readNumeric(
+        rule?.count ??
+          rule?.derivedCount ??
+          rule?.target ??
+          rule?.value ??
+          rule?.min ??
+          rule?.minimum ??
+          null,
+      );
+      const valueTokens = Array.from(
+        new Set(
+          collectFailureValueTokens(rule?.value ?? rule?.values ?? null, []),
+        ),
+      ).sort();
+      const parts = [`type:${type}`];
+      if (op) parts.push(`op:${op}`);
+      if (key) parts.push(`key:${key}`);
+      if (target != null) parts.push(`target:${target}`);
+      if (valueTokens.length) parts.push(`value:${valueTokens.join(",")}`);
+      return parts.join("|");
+    };
+
+    const buildRequirementLineItems = (snapshot) => {
+      if (!snapshot || typeof snapshot !== "object") return [];
+      const items = [];
+      const seen = new Set();
+      const pushItem = (value, ruleRef = null) => {
+        if (value == null) return;
+        const text = String(value).trim();
+        if (!text) return;
+        const dedupeKey = text.toLowerCase();
+        if (seen.has(dedupeKey)) return;
+        seen.add(dedupeKey);
+        items.push({
+          text,
+          key: normalizeFailureRuleKey(ruleRef ?? text),
+          textToken: normalizeFailureToken(text),
+        });
+      };
+
+      const normalized = Array.isArray(snapshot?.requirementsNormalized)
+        ? snapshot.requirementsNormalized
+        : [];
+      for (const row of normalized) {
+        if (typeof row === "string") {
+          pushItem(row, row);
+          continue;
+        }
+        if (!row || typeof row !== "object") {
+          if (row != null) pushItem(row, row);
+          continue;
+        }
+        const direct = row.label ?? row.description ?? row.text ?? null;
+        if (direct) {
+          pushItem(direct, row);
+          continue;
+        }
+        const type =
+          row.type ?? row.keyNameNormalized ?? row.keyName ?? "Requirement";
+        const min = readNumeric(
+          row.count ?? row.derivedCount ?? row.value ?? row.min ?? row.minimum,
+        );
+        const max = readNumeric(row.max ?? row.maximum ?? null);
+        if (min != null && max != null && min !== max) {
+          pushItem(`${type}: ${min}-${max}`, row);
+        } else if (min != null) {
+          pushItem(`${type}: ${min}`, row);
+        } else {
+          pushItem(type, row);
+        }
+      }
+
+      if (!items.length) {
+        const parsed = Array.isArray(snapshot?.requirements)
+          ? snapshot.requirements
+          : Array.isArray(snapshot?.requirementsParsed)
+            ? snapshot.requirementsParsed
+            : [];
+        for (const req of parsed) {
+          if (!req || typeof req !== "object") continue;
+          const direct =
+            req.description ??
+            req.eligibilityLabel ??
+            req.label ??
+            req.name ??
+            req.title ??
+            null;
+          if (direct) {
+            pushItem(direct, req);
+            continue;
+          }
+          const type =
+            req.type ?? req.requirementType ?? req.attribute ?? "Requirement";
+          const min = readNumeric(
+            req.value ?? req.count ?? req.min ?? req.minimum ?? null,
+          );
+          const max = readNumeric(req.max ?? req.maximum ?? null);
+          if (min != null && max != null && min !== max) {
+            pushItem(`${type}: ${min}-${max}`, req);
+          } else if (min != null) {
+            pushItem(`${type}: ${min}`, req);
+          } else {
+            pushItem(type, req);
+          }
+        }
+      }
+
+      const squadSize = readNumeric(snapshot?.squadSize);
+      if (squadSize != null) {
+        const hasSquadLine = items.some((item) =>
+          /players in squad|squad size/i.test(item?.text ?? ""),
+        );
+        if (!hasSquadLine) {
+          pushItem(`Players in Squad: ${squadSize}`, {
+            type: "players_in_squad",
+            op: "exact",
+            count: squadSize,
+            value: squadSize,
+            label: `Players in Squad: ${squadSize}`,
+          });
+        }
+      }
+
+      return items;
+    };
+
+    const matchFailureRulesToRequirementIndices = (failureRules, lineItems) => {
+      const blocked = new Set();
+      const rows = Array.isArray(lineItems) ? lineItems : [];
+      if (!rows.length) return blocked;
+      const failing = Array.isArray(failureRules) ? failureRules : [];
+      if (!failing.length) return blocked;
+
+      const failingRuleKeys = new Set();
+      const failingTextTokens = new Set();
+      for (const rule of failing) {
+        const key = normalizeFailureRuleKey(rule);
+        if (key) failingRuleKeys.add(key);
+        const token = normalizeFailureToken(
+          rule?.label ??
+            rule?.description ??
+            rule?.eligibilityLabel ??
+            rule?.text ??
+            rule?.type ??
+            rule?.keyNameNormalized ??
+            null,
+        );
+        if (token) failingTextTokens.add(token);
+      }
+
+      for (let i = 0; i < rows.length; i += 1) {
+        const row = rows[i];
+        if (!row) continue;
+        if (row.key && failingRuleKeys.has(row.key)) {
+          blocked.add(i);
+          continue;
+        }
+        if (row.textToken && failingTextTokens.has(row.textToken)) {
+          blocked.add(i);
+        }
+      }
+      return blocked;
+    };
+
+    const getFailureSourceMeta = (source) => {
+      const normalized = String(source ?? "").toLowerCase();
+      if (normalized === "pool-conflict") {
+        return {
+          label: "Pool Conflict",
+          badgeClass: "ea-data-setsolve-req-badge--pool",
+          sectionLabel: "Pool Exclusion",
+        };
+      }
+      if (normalized === "slot-unavailable") {
+        return {
+          label: "Challenge Data",
+          badgeClass: "ea-data-setsolve-req-badge--system",
+          sectionLabel: "Challenge Data",
+        };
+      }
+      if (normalized === "system") {
+        return {
+          label: "System",
+          badgeClass: "ea-data-setsolve-req-badge--system",
+          sectionLabel: "System",
+        };
+      }
+      return {
+        label: "Solver",
+        badgeClass: "ea-data-setsolve-req-badge--solver",
+        sectionLabel: "Solver",
+      };
+    };
+
+    const createSetSolveInfoSection = (title) => {
+      const section = document.createElement("section");
+      section.className = "ea-data-setsolve-info-section";
+      const heading = document.createElement("div");
+      heading.className = "ea-data-setsolve-info-section-title";
+      heading.textContent = String(title ?? "");
+      section.append(heading);
+      return section;
+    };
+
+    const appendSetSolveInfoRow = (section, label, value) => {
+      if (!section) return;
+      const row = document.createElement("div");
+      row.className = "ea-data-setsolve-info-row";
+      const labelEl = document.createElement("div");
+      labelEl.className = "ea-data-setsolve-info-label";
+      labelEl.textContent = String(label ?? "");
+      const valueEl = document.createElement("div");
+      valueEl.className = "ea-data-setsolve-info-value";
+      valueEl.textContent = String(value ?? "n/a");
+      row.append(labelEl);
+      row.append(valueEl);
+      section.append(row);
+    };
+
+    const renderSetSolveRightPanel = ({ reason = "state" } = {}) => {
+      if (!rightPanelWrap) return;
+      ensureSetSolveRightPanelState();
+      try {
+        rightPanelWrap.setAttribute("data-panel-reason", String(reason));
+      } catch {}
+
+      const challenges = Array.isArray(setSolveOverlayState?.availableChallenges)
+        ? setSolveOverlayState.availableChallenges
+        : [];
+      const selectedIds = setSolveOverlayState?.selectedChallengeIds;
+      const selectedCount =
+        selectedIds == null ? challenges.length : selectedIds.size;
+      const setId =
+        readNumeric(setSolveOverlayState?.setId) ??
+        readNumeric(currentSbcSet?.id) ??
+        readNumeric(currentChallenge?.setId) ??
+        null;
+      const setEntity = getSbcSetById(setId) ?? currentSbcSet ?? null;
+      const setName =
+        setSolveOverlayState?.setName ?? setEntity?.name ?? "Current Set";
+      const repeatInfo = getSbcSetRepeatabilityInfo(setId, {
+        unlimitedDefault: 50,
+        clampMax: 50,
+      });
+      const repeatMode = String(repeatInfo?.mode ?? "FINITE").toUpperCase();
+      const remaining = readNumeric(repeatInfo?.remaining);
+      const attemptsLeft =
+        repeatMode === "UNLIMITED"
+          ? "Unlimited"
+          : remaining == null
+            ? "n/a"
+            : String(Math.max(0, remaining));
+      const entries = Array.isArray(setSolveOverlayState?.entries)
+        ? setSolveOverlayState.entries
+        : [];
+      const cycleResults = Array.isArray(setSolveOverlayState?.cycleResults)
+        ? setSolveOverlayState.cycleResults
+        : [];
+      const isMultiModeActive = Boolean(setSolveOverlayState?.multiSetEnabled);
+      const useCycleSummary =
+        isMultiModeActive &&
+        cycleResults.some(
+        (cycle) => Array.isArray(cycle?.entries) && cycle.entries.length > 0,
+      );
+      const summaryEntries = useCycleSummary
+        ? cycleResults.flatMap((cycle) =>
+            Array.isArray(cycle?.entries) ? cycle.entries : [],
+          )
+        : entries;
+      const solvedEntries = summaryEntries.filter(
+        (entry) => entry?.status === "solved",
+      ).length;
+      const failedEntries = summaryEntries.filter(
+        (entry) => entry && entry?.status !== "solved",
+      ).length;
+      const submittedEntries = summaryEntries.filter(
+        (entry) => entry?.submitState === "submitted",
+      ).length;
+      const challengeOutcomeById = new Map();
+      for (const entry of summaryEntries) {
+        const challengeId =
+          entry?.challengeId == null ? null : String(entry.challengeId);
+        if (!challengeId) continue;
+        challengeOutcomeById.set(
+          challengeId,
+          entry?.status === "solved" ? "solved" : "failed",
+        );
+      }
+      const solvedCycles = cycleResults.filter(
+        (cycle) => cycle?.status === "solved",
+      ).length;
+      const discardedCycles = cycleResults.filter(
+        (cycle) => cycle?.status === "discarded",
+      ).length;
+      const submittedCycles = cycleResults.filter(
+        (cycle) => cycle?.submitState === "submitted",
+      ).length;
+      const requestedCyclesInput = clampInt(
+        setSolveOverlayState?.requestedSetCyclesInput ?? 1,
+        1,
+        50,
+      );
+      const requestedCycles = clampInt(
+        setSolveOverlayState?.requestedSetCycles ?? 1,
+        1,
+        50,
+      );
+      const feasibleCycles = clampInt(
+        setSolveOverlayState?.maxFeasibleCycles ?? null,
+        0,
+        50,
+      );
+      const requirementsById =
+        setSolveOverlayState?.requirementsByChallengeId instanceof Map
+          ? setSolveOverlayState.requirementsByChallengeId
+          : new Map();
+      const inFlight =
+        setSolveOverlayState?.requirementsInFlight instanceof Set
+          ? setSolveOverlayState.requirementsInFlight
+          : new Set();
+      const failureByChallengeId =
+        setSolveOverlayState?.failureByChallengeId instanceof Map
+          ? setSolveOverlayState.failureByChallengeId
+          : new Map();
+      const latestFailureContext =
+        setSolveOverlayState?.latestFailureContext &&
+        typeof setSolveOverlayState.latestFailureContext === "object"
+          ? setSolveOverlayState.latestFailureContext
+          : null;
+      const generationStopReason = sanitizeDisplayText(
+        setSolveOverlayState?.generationStopReason,
+      );
+
+      clearNode(rightPanelWrap);
+
+      const title = document.createElement("div");
+      title.className = "ea-data-setsolve-info-title";
+      title.textContent = "Set Information";
+      rightPanelWrap.append(title);
+
+      const overview = createSetSolveInfoSection("Set Overview");
+      appendSetSolveInfoRow(overview, "Set", setName);
+      appendSetSolveInfoRow(
+        overview,
+        "Challenges",
+        `${selectedCount}/${challenges.length || 0} selected`,
+      );
+      appendSetSolveInfoRow(
+        overview,
+        "Repeatability",
+        repeatMode === "UNLIMITED" ? "Unlimited" : "Finite",
+      );
+      appendSetSolveInfoRow(overview, "Attempts Left", attemptsLeft);
+      appendSetSolveInfoRow(
+        overview,
+        "Multi-Cycle",
+        setSolveOverlayState?.multiSetEnabled ? "Enabled" : "Disabled",
+      );
+      rightPanelWrap.append(overview);
+
+      const summary = createSetSolveInfoSection("Set Summary");
+      appendSetSolveInfoRow(summary, "Entries", summaryEntries.length);
+      appendSetSolveInfoRow(summary, "Solved Entries", solvedEntries);
+      appendSetSolveInfoRow(summary, "Failed Entries", failedEntries);
+      appendSetSolveInfoRow(summary, "Submitted Entries", submittedEntries);
+      if (isMultiModeActive) {
+        appendSetSolveInfoRow(
+          summary,
+          "Cycles",
+          `${solvedCycles}/${cycleResults.length || 0} solved`,
+        );
+        appendSetSolveInfoRow(summary, "Discarded Cycles", discardedCycles);
+        appendSetSolveInfoRow(summary, "Submitted Cycles", submittedCycles);
+        appendSetSolveInfoRow(
+          summary,
+          "Requested Cycles (Input)",
+          requestedCyclesInput ?? 1,
+        );
+        appendSetSolveInfoRow(
+          summary,
+          "Requested Cycles (Effective)",
+          requestedCycles ?? 1,
+        );
+        appendSetSolveInfoRow(
+          summary,
+          "Feasible Cycles",
+          feasibleCycles == null ? "n/a" : feasibleCycles,
+        );
+      }
+      rightPanelWrap.append(summary);
+
+      const showFailureSection = latestFailureContext != null || generationStopReason;
+      if (showFailureSection) {
+        const failureSection = createSetSolveInfoSection("Latest Failure");
+        if (latestFailureContext) {
+          const sourceMeta = getFailureSourceMeta(latestFailureContext?.source);
+          appendSetSolveInfoRow(
+            failureSection,
+            "Challenge",
+            latestFailureContext?.challengeName ??
+              latestFailureContext?.challengeId ??
+              "n/a",
+          );
+          appendSetSolveInfoRow(
+            failureSection,
+            "Cycle",
+            latestFailureContext?.cycleIndex == null
+              ? "n/a"
+              : String(latestFailureContext.cycleIndex),
+          );
+          appendSetSolveInfoRow(
+            failureSection,
+            "Source",
+            sourceMeta?.sectionLabel ?? "Unknown",
+          );
+          if (latestFailureContext?.reason) {
+            const reasonEl = document.createElement("div");
+            reasonEl.className = "ea-data-setsolve-failure-reason";
+            reasonEl.textContent = String(latestFailureContext.reason);
+            failureSection.append(reasonEl);
+          }
+        }
+        if (generationStopReason) {
+          const stopReasonEl = document.createElement("div");
+          stopReasonEl.className = "ea-data-setsolve-hint";
+          stopReasonEl.textContent = `Generation stop: ${generationStopReason}`;
+          failureSection.append(stopReasonEl);
+        }
+        rightPanelWrap.append(failureSection);
+      }
+
+      const reqSection = createSetSolveInfoSection("Challenge Requirements");
+      const reqList = document.createElement("div");
+      reqList.className = "ea-data-setsolve-req-list";
+      if (!challenges.length) {
+        const empty = document.createElement("div");
+        empty.className = "ea-data-setsolve-empty";
+        empty.textContent = "No challenge requirements are available yet.";
+        reqList.append(empty);
+      } else {
+        for (const challenge of challenges) {
+          const challengeId = challenge?.id == null ? null : String(challenge.id);
+          if (!challengeId) continue;
+          const challengeName =
+            challenge?.name ??
+            challenge?.title ??
+            `Challenge ${challengeId}`;
+          const cached = requirementsById.get(challengeId) ?? null;
+          const challengeFailures = failureByChallengeId.get(challengeId);
+          const failureHistory = Array.isArray(challengeFailures)
+            ? challengeFailures
+            : [];
+          const challengeFailure =
+            failureHistory.length > 0
+              ? failureHistory[failureHistory.length - 1]
+              : null;
+          const derivedOutcome =
+            challengeOutcomeById.get(challengeId) ??
+            (challengeFailure ? "failed" : null);
+          const failureSourceMeta = getFailureSourceMeta(
+            challengeFailure?.source ?? null,
+          );
+          const activeLoading =
+            inFlight.has(challengeId) || cached?.status === "loading";
+          const status = activeLoading
+            ? "loading"
+            : cached?.status === "error"
+              ? "error"
+              : "ready";
+          const lineItems = buildRequirementLineItems(cached?.snapshot ?? null);
+          const lines = lineItems.map((item) => item.text);
+          const blockedIndices = matchFailureRulesToRequirementIndices(
+            challengeFailure?.failingRequirements ?? [],
+            lineItems,
+          );
+          const showReasonOnlyFallback =
+            challengeFailure != null &&
+            blockedIndices.size === 0 &&
+            Boolean(challengeFailure?.reason);
+
+          const card = document.createElement("div");
+          card.className = "ea-data-setsolve-req-card";
+          if (derivedOutcome === "failed") {
+            card.classList.add("ea-data-setsolve-req-card--failed");
+          } else if (derivedOutcome === "solved") {
+            card.classList.add("ea-data-setsolve-req-card--solved");
+          }
+
+          const head = document.createElement("div");
+          head.className = "ea-data-setsolve-req-head";
+          const nameEl = document.createElement("div");
+          nameEl.className = "ea-data-setsolve-req-name";
+          nameEl.textContent = challengeName;
+          nameEl.title = challengeName;
+          const headRight = document.createElement("div");
+          headRight.className = "ea-data-setsolve-req-head-right";
+          const statusEl = document.createElement("span");
+          statusEl.className = `ea-data-setsolve-req-status ea-data-setsolve-req-status--${status}`;
+          statusEl.textContent =
+            status === "loading"
+              ? "Loading"
+              : status === "error"
+                ? "Unavailable"
+                : "Ready";
+          headRight.append(statusEl);
+          if (challengeFailure) {
+            const badgeEl = document.createElement("span");
+            badgeEl.className = `ea-data-setsolve-req-badge ${failureSourceMeta.badgeClass}`;
+            badgeEl.textContent = failureSourceMeta.label;
+            badgeEl.title = challengeFailure?.reason
+              ? String(challengeFailure.reason)
+              : failureSourceMeta.label;
+            headRight.append(badgeEl);
+          } else if (derivedOutcome === "solved") {
+            const badgeEl = document.createElement("span");
+            badgeEl.className =
+              "ea-data-setsolve-req-badge ea-data-setsolve-req-badge--solved";
+            badgeEl.textContent = "Solved";
+            badgeEl.title = "Challenge solved";
+            headRight.append(badgeEl);
+          }
+          head.append(nameEl);
+          head.append(headRight);
+          card.append(head);
+
+          if (status === "loading" && !lines.length) {
+            const skeleton = document.createElement("div");
+            skeleton.className = "ea-data-setsolve-skeleton";
+            for (let i = 0; i < 3; i += 1) {
+              const line = document.createElement("div");
+              line.className = "ea-data-setsolve-skeleton-line";
+              skeleton.append(line);
+            }
+            card.append(skeleton);
+          } else if (lines.length) {
+            const list = document.createElement("ul");
+            list.className = "ea-data-setsolve-req-lines";
+            for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+              const lineText = lines[lineIndex];
+              const li = document.createElement("li");
+              li.textContent = lineText;
+              if (blockedIndices.has(lineIndex)) {
+                li.classList.add("ea-data-setsolve-req-line--blocked");
+              }
+              list.append(li);
+            }
+            card.append(list);
+            if (showReasonOnlyFallback) {
+              const reason = document.createElement("div");
+              reason.className = "ea-data-setsolve-failure-reason";
+              reason.textContent = String(challengeFailure.reason);
+              card.append(reason);
+            }
+            if (status === "loading") {
+              const hint = document.createElement("div");
+              hint.className = "ea-data-setsolve-hint";
+              hint.textContent = "Refreshing latest requirement details...";
+              card.append(hint);
+            }
+          } else {
+            const empty = document.createElement("div");
+            empty.className = "ea-data-setsolve-empty";
+            empty.textContent =
+              status === "error"
+                ? cached?.errorMessage ||
+                  "Failed to load requirement details for this challenge."
+                : "No requirement details returned by EA for this challenge.";
+            card.append(empty);
+            if (showReasonOnlyFallback) {
+              const reason = document.createElement("div");
+              reason.className = "ea-data-setsolve-failure-reason";
+              reason.textContent = String(challengeFailure.reason);
+              card.append(reason);
+            }
+          }
+
+          reqList.append(card);
+        }
+      }
+      reqSection.append(reqList);
+      rightPanelWrap.append(reqSection);
+      setSolveOverlayState.rightPanelInitialized = true;
+    };
+
+    const refreshSetSolveRequirements = async (setId, challengesInput = null) => {
+      ensureSetSolveRightPanelState();
+      const state = setSolveOverlayState ?? null;
+      if (!state) return;
+
+      const targetSetId =
+        readNumeric(setId) ??
+        readNumeric(state?.setId) ??
+        readNumeric(currentSbcSet?.id) ??
+        readNumeric(currentChallenge?.setId) ??
+        null;
+      const setKey = targetSetId == null ? null : String(targetSetId);
+      const challenges = (
+        Array.isArray(challengesInput)
+          ? challengesInput
+          : Array.isArray(state?.availableChallenges)
+            ? state.availableChallenges
+            : []
+      ).filter(Boolean);
+      const requirementsById = state.requirementsByChallengeId;
+      const prefetchedRequirementsById = getPrefetchedSetRequirementsByChallengeId(
+        targetSetId,
+      );
+
+      if (!(requirementsById instanceof Map)) return;
+      if (state.rightPanelLastSetId !== setKey) {
+        requirementsById.clear();
+      }
+      state.rightPanelLastSetId = setKey;
+
+      const prevToken = Number(state.requirementsLoadToken);
+      const token = Number.isFinite(prevToken) ? prevToken + 1 : 1;
+      state.requirementsLoadToken = token;
+      if (state.requirementsInFlight instanceof Set) {
+        state.requirementsInFlight.clear();
+      } else {
+        state.requirementsInFlight = new Set();
+      }
+
+      if (!challenges.length) {
+        requirementsById.clear();
+        renderSetSolveRightPanel({ reason: "requirements-empty" });
+        return;
+      }
+
+      const validIds = new Set();
+      const needsLoad = [];
+      for (const challenge of challenges) {
+        const challengeId = challenge?.id == null ? null : String(challenge.id);
+        if (!challengeId) continue;
+        validIds.add(challengeId);
+        const challengeName =
+          challenge?.name ??
+          challenge?.title ??
+          `Challenge ${challengeId}`;
+        const prefetched = prefetchedRequirementsById?.get?.(challengeId) ?? null;
+        const hasPrefetchedSnapshot =
+          prefetched?.snapshot && typeof prefetched.snapshot === "object";
+        const snapshot = hasPrefetchedSnapshot
+          ? prefetched.snapshot
+          : buildRequirementsSnapshot(challenge, null);
+        requirementsById.set(challengeId, {
+          challengeId,
+          challengeName,
+          snapshot,
+          source: hasPrefetchedSnapshot
+            ? (prefetched?.source ?? "prefetch")
+            : "snapshot-local",
+          status: hasPrefetchedSnapshot ? "ready" : "loading",
+          updatedAt: Date.now(),
+          errorMessage: null,
+        });
+        if (!hasPrefetchedSnapshot) needsLoad.push(challenge);
+      }
+      for (const existingId of Array.from(requirementsById.keys())) {
+        if (!validIds.has(existingId)) requirementsById.delete(existingId);
+      }
+      renderSetSolveRightPanel({ reason: "requirements-seed" });
+
+      for (const challenge of needsLoad) {
+        if (state.requirementsLoadToken !== token) return;
+        const challengeId = challenge?.id == null ? null : String(challenge.id);
+        if (!challengeId) continue;
+        const challengeName =
+          challenge?.name ??
+          challenge?.title ??
+          `Challenge ${challengeId}`;
+        state.requirementsInFlight.add(challengeId);
+        renderSetSolveRightPanel({ reason: "requirements-loading" });
+        try {
+          const loaded = await loadChallenge(challenge, true, { force: true });
+          if (state.requirementsLoadToken !== token) return;
+          const snapshot = buildRequirementsSnapshot(
+            challenge,
+            loaded?.data ?? loaded,
+          );
+          requirementsById.set(challengeId, {
+            challengeId,
+            challengeName,
+            snapshot,
+            source: "snapshot-loaded",
+            status: "ready",
+            updatedAt: Date.now(),
+            errorMessage: null,
+          });
+          upsertPrefetchedSetRequirement(targetSetId, challengeId, {
+            challengeId,
+            challengeName,
+            snapshot,
+            source: "snapshot-loaded",
+            status: "ready",
+            updatedAt: Date.now(),
+            errorMessage: null,
+          });
+        } catch (err) {
+          if (state.requirementsLoadToken !== token) return;
+          const existing = requirementsById.get(challengeId) ?? null;
+          requirementsById.set(challengeId, {
+            challengeId,
+            challengeName,
+            snapshot: existing?.snapshot ?? null,
+            source: existing?.source ?? "fallback",
+            status: "error",
+            updatedAt: Date.now(),
+            errorMessage:
+              err?.message == null
+                ? "Failed to load requirements from server."
+                : String(err.message),
+          });
+          upsertPrefetchedSetRequirement(targetSetId, challengeId, {
+            challengeId,
+            challengeName,
+            snapshot: existing?.snapshot ?? null,
+            source: existing?.source ?? "fallback",
+            status: "error",
+            updatedAt: Date.now(),
+            errorMessage:
+              err?.message == null
+                ? "Failed to load requirements from server."
+                : String(err.message),
+          });
+          log("debug", "[EA Data] Set solve requirements refresh failed", {
+            setId: targetSetId,
+            challengeId,
+            error: err,
+          });
+        } finally {
+          state.requirementsInFlight.delete(challengeId);
+        }
+        if (state.requirementsLoadToken !== token) return;
+        renderSetSolveRightPanel({ reason: "requirements-updated" });
+      }
+    };
+
     const getContentHash = () => {
       try {
         const img = document.querySelector(
@@ -8677,6 +10135,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         empty.className = "ea-data-solutions-empty";
         empty.textContent = "No challenges available.";
         challengePickerWrap.append(empty);
+        renderSetSolveRightPanel({ reason: "picker-empty" });
         return;
       }
 
@@ -8739,6 +10198,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 
         challengePickerWrap.append(card);
       }
+      renderSetSolveRightPanel({ reason: "picker-ready" });
     };
 
     const renderEntries = () => {
@@ -9020,7 +10480,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           targetNode.append(playersWrap);
         };
 
-        if (!cycle) return;
+        if (!cycle) {
+          renderSetSolveRightPanel({ reason: "entries-no-cycle" });
+          return;
+        }
         const cycleIndex = readNumeric(cycle?.cycleIndex) ?? 0;
         const cycleEntries = Array.isArray(cycle?.entries) ? cycle.entries : [];
         const cycleBlock = document.createElement("div");
@@ -9280,6 +10743,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           summary.append(pillsNode);
           listEl.append(summary);
         } catch {}
+        renderSetSolveRightPanel({ reason: "entries-combined" });
         return;
       }
 
@@ -9288,6 +10752,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         empty.className = "ea-data-solutions-empty";
         empty.textContent = "No set solutions fetched yet.";
         listEl.append(empty);
+        renderSetSolveRightPanel({ reason: "entries-empty" });
         return;
       }
 
@@ -9687,6 +11152,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         summary.append(pills);
         listEl.append(summary);
       } catch {}
+      renderSetSolveRightPanel({ reason: "entries-single" });
     };
 
     listEl?.addEventListener("click", (event) => {
@@ -10006,9 +11472,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       );
       const effectiveMax = cappedRepeatMax;
       const currentValue = readNumeric(setCyclesInput?.value);
-      const requestedFromState = readNumeric(
-        setSolveOverlayState?.requestedSetCycles,
+      const requestedFromInputState = readNumeric(
+        setSolveOverlayState?.requestedSetCyclesInput,
       );
+      const requestedFromState =
+        requestedFromInputState ??
+        readNumeric(setSolveOverlayState?.requestedSetCycles);
       const preferredValue =
         source === "input"
           ? (currentValue ?? requestedFromState)
@@ -10027,9 +11496,13 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         }
       } catch {}
       try {
+        setSolveOverlayState.requestedSetCyclesInput = finalRequested;
+      } catch {}
+      try {
         setSolveOverlayState.requestedSetCycles = finalRequested;
       } catch {}
       updateSetCycleMeta();
+      renderSetSolveRightPanel({ reason: "cycle-controls" });
     };
 
     const syncSetCycleRepeatability = (
@@ -10054,12 +11527,21 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         setSolveOverlayState.repeatabilityRemaining = readNumeric(
           info?.remaining,
         );
-        if (
-          resetRequested ||
-          readNumeric(setSolveOverlayState?.requestedSetCycles) == null
-        ) {
-          setSolveOverlayState.requestedSetCycles = nextRequested;
-        }
+        const requestedInput = readNumeric(
+          setSolveOverlayState?.requestedSetCyclesInput,
+        );
+        const nextRequestedInput =
+          resetRequested || requestedInput == null
+            ? nextRequested
+            : requestedInput;
+        setSolveOverlayState.requestedSetCyclesInput =
+          nextRequestedInput == null ? 1 : nextRequestedInput;
+        setSolveOverlayState.requestedSetCycles =
+          clampInt(
+            setSolveOverlayState.requestedSetCyclesInput,
+            1,
+            repeatabilityMax,
+          ) ?? 1;
         const currentFeasible = readNumeric(
           setSolveOverlayState?.maxFeasibleCycles,
         );
@@ -10153,6 +11635,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       setSolveOverlayState.activeIndex = 0;
       setSolveOverlayState.sortKey = "rating_desc";
       setSolveOverlayState.maxFeasibleCycles = null;
+      setSolveOverlayState.generationStopReason = null;
+      setSolveOverlayState.latestFailureContext = null;
+      try {
+        setSolveOverlayState.failureByChallengeId?.clear?.();
+      } catch {}
       setSolveOverlayState.abortRequested = false;
       if (!preserveConfig) {
         try {
@@ -10160,6 +11647,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         } catch {}
         try {
           setSolveOverlayState.multiSetEnabled = false;
+        } catch {}
+        try {
+          setSolveOverlayState.requestedSetCyclesInput = 1;
+          setSolveOverlayState.requestedSetCycles = 1;
         } catch {}
       }
       setRunning(false);
@@ -10178,6 +11669,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         setSolveOverlayState?.setId === setKey
       ) {
         if (setName) setSolveOverlayState.setName = String(setName);
+        renderSetSolveRightPanel({ reason: "context-unchanged" });
         return;
       }
       reset();
@@ -10185,6 +11677,20 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       setSolveOverlayState.setId = setKey;
       setSolveOverlayState.setName = setName == null ? null : String(setName);
       setSolveOverlayState.maxFeasibleCycles = null;
+      ensureSetSolveRightPanelState();
+      try {
+        setSolveOverlayState.requirementsLoadToken += 1;
+      } catch {}
+      try {
+        setSolveOverlayState.rightPanelLastSetId = setKey;
+      } catch {}
+      try {
+        setSolveOverlayState.requirementsByChallengeId?.clear?.();
+      } catch {}
+      try {
+        setSolveOverlayState.requirementsInFlight?.clear?.();
+      } catch {}
+      renderSetSolveRightPanel({ reason: "context-reset" });
       try {
         syncRatingRange({ ratingMin: 0, ratingMax: 99 }, { source: "init" });
         syncPoolSettings(getDefaultSolverSettings());
@@ -10198,18 +11704,17 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     };
 
     const getSortedSetChallenges = async (setId) => {
-      const raw = await getChallengesBySetIdsRaw([setId]);
-      const list = Array.isArray(raw) ? raw.filter(Boolean) : [];
-      const incomplete = list.filter(
-        (c) => c?.status !== "COMPLETED" && !Boolean(c?.isCompleted?.()),
-      );
-      return incomplete.sort((a, b) => {
-        const an = String(a?.name ?? "");
-        const bn = String(b?.name ?? "");
-        const cmp = an.localeCompare(bn);
-        if (cmp) return cmp;
-        return (readNumeric(a?.id) ?? 0) - (readNumeric(b?.id) ?? 0);
-      });
+      const normalizedSetId = readNumeric(setId);
+      if (normalizedSetId == null) return [];
+      const cached = getPrefetchedSetChallenges(normalizedSetId);
+      if (Array.isArray(cached) && cached.length) return cached;
+      void prefetchSetChallengeInfo(normalizedSetId, {
+        reason: "set-solver-fetch",
+      }).catch(() => {});
+      const raw = await getChallengesBySetIdsRaw([normalizedSetId]);
+      const sorted = sortSetChallengesForSolver(raw);
+      upsertPrefetchedSetChallenges(normalizedSetId, sorted);
+      return sorted;
     };
 
     const generateSetSolutions = async () => {
@@ -10243,6 +11748,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           currentSbcSet?.name ?? currentChallenge?.set?.name ?? null;
       }
       syncSetCycleRepeatability(startedSetId, { resetRequested: false });
+      ensureSetSolveRightPanelState();
+      try {
+        setSolveOverlayState.failureByChallengeId?.clear?.();
+      } catch {}
+      setSolveOverlayState.latestFailureContext = null;
+      setSolveOverlayState.generationStopReason = null;
       setSolveOverlayState.abortRequested = false;
       setRunning(true, { mode: "generating" });
       setStatus("Preparing solver...");
@@ -10264,7 +11775,6 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         setStatus("Fetching players...");
         const payload = await window.eaData.getSolverPayload({
           ignoreLoaned: true,
-          forcePlayersFetch: true,
         });
 
         const hasSetChanged = () => {
@@ -10343,12 +11853,123 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         });
         const repeatMax = clampInt(repeatInfo?.max ?? 1, 1, 50) ?? 1;
 
+        const buildFailureMeta = ({
+          source = "solver",
+          reason = null,
+          challenge = null,
+          challengeName = null,
+          cycleIndex = null,
+          failingRequirements = [],
+          stats = null,
+        } = {}) => {
+          const resolvedChallengeName =
+            challengeName ??
+            challenge?.name ??
+            challenge?.title ??
+            `Challenge ${challenge?.id ?? "?"}`;
+          const resolvedReason =
+            reason ?? "No feasible squad with current player pool.";
+          return {
+            source,
+            reason: resolvedReason,
+            challengeId: challenge?.id ?? null,
+            challengeName: resolvedChallengeName,
+            cycleIndex: readNumeric(cycleIndex),
+            failingRequirements: Array.isArray(failingRequirements)
+              ? failingRequirements
+              : [],
+            stats: stats ?? null,
+            at: Date.now(),
+          };
+        };
+
+        const recordFailureMeta = (failureMeta) => {
+          if (!failureMeta || typeof failureMeta !== "object") return;
+          ensureSetSolveRightPanelState();
+          const challengeId =
+            failureMeta?.challengeId == null
+              ? null
+              : String(failureMeta.challengeId);
+          if (challengeId) {
+            const currentList = Array.isArray(
+              setSolveOverlayState?.failureByChallengeId?.get?.(challengeId),
+            )
+              ? setSolveOverlayState.failureByChallengeId.get(challengeId)
+              : [];
+            const nextList = currentList.concat(failureMeta).slice(-30);
+            setSolveOverlayState.failureByChallengeId.set(challengeId, nextList);
+          }
+          setSolveOverlayState.latestFailureContext = {
+            source: failureMeta?.source ?? "solver",
+            reason: failureMeta?.reason ?? null,
+            challengeId,
+            challengeName: failureMeta?.challengeName ?? null,
+            cycleIndex: readNumeric(failureMeta?.cycleIndex),
+            at: readNumeric(failureMeta?.at) ?? Date.now(),
+          };
+        };
+
+        const collectPoolConflictFailureRequirements = (
+          conflict,
+          requirementsNormalized,
+        ) => {
+          const rules = Array.isArray(requirementsNormalized)
+            ? requirementsNormalized
+            : [];
+          if (!conflict?.hasConflict || !rules.length) return [];
+          const leagueIds = new Set(
+            (conflict?.conflictingLeagueIds ?? []).map((value) =>
+              String(value),
+            ),
+          );
+          const nationIds = new Set(
+            (conflict?.conflictingNationIds ?? []).map((value) =>
+              String(value),
+            ),
+          );
+          const matched = [];
+          for (const rule of rules) {
+            if (!rule || typeof rule !== "object") continue;
+            const typeHint = String(
+              rule?.type ?? rule?.keyNameNormalized ?? "",
+            ).toLowerCase();
+            const labelHint = String(rule?.label ?? "").toLowerCase();
+            if (leagueIds.size > 0) {
+              const hasLeagueSignal =
+                typeHint.includes("league") || labelHint.includes("league");
+              if (hasLeagueSignal) {
+                const ids = extractLeagueIdsFromRequirementValue(rule?.value);
+                if (ids.some((value) => leagueIds.has(String(value)))) {
+                  matched.push(rule);
+                  continue;
+                }
+              }
+            }
+            if (nationIds.size > 0) {
+              const hasNationSignal =
+                typeHint.includes("nation") ||
+                typeHint.includes("country") ||
+                labelHint.includes("nation") ||
+                labelHint.includes("country");
+              if (hasNationSignal) {
+                const ids = extractNationIdsFromRequirementValue(rule?.value);
+                if (ids.some((value) => nationIds.has(String(value)))) {
+                  matched.push(rule);
+                  continue;
+                }
+              }
+            }
+          }
+          return matched;
+        };
+
         const makeEntryFromFailure = ({
           challenge = null,
           challengeName = null,
           reason = null,
           slotInfo = null,
           stats = null,
+          failureMeta = null,
         } = {}) => ({
           challengeId: challenge?.id ?? null,
           challengeName:
@@ -10364,6 +11985,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           requiredPlayers: slotInfo?.requiredPlayers ?? null,
           specialCount: 0,
           stats: stats ?? null,
+          failureMeta: failureMeta ?? null,
           submitState: null,
         });
 
@@ -10405,12 +12027,20 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               !Array.isArray(slotInfo?.squadSlots) ||
               !slotInfo.squadSlots.length
             ) {
+              const failureMeta = buildFailureMeta({
+                source: "slot-unavailable",
+                challenge,
+                challengeName,
+                reason: "Challenge slots unavailable.",
+              });
+              recordFailureMeta(failureMeta);
               entries.push(
                 makeEntryFromFailure({
                   challenge,
                   challengeName,
                   reason: "Challenge slots unavailable.",
                   slotInfo,
+                  failureMeta,
                 }),
               );
               setSolveOverlayState.entries = entries;
@@ -10428,14 +12058,28 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               const notice = buildSolverPoolConflictNotice(poolConflict, {
                 challengeName,
               });
+              const reason =
+                notice?.reason ??
+                "Current exclusions conflict with challenge requirements.";
+              const conflictRules = collectPoolConflictFailureRequirements(
+                poolConflict,
+                safeRequirementsNormalized,
+              );
+              const failureMeta = buildFailureMeta({
+                source: "pool-conflict",
+                challenge,
+                challengeName,
+                reason,
+                failingRequirements: conflictRules,
+              });
+              recordFailureMeta(failureMeta);
               entries.push(
                 makeEntryFromFailure({
                   challenge,
                   challengeName,
-                  reason:
-                    notice?.reason ??
-                    "Current exclusions conflict with challenge requirements.",
+                  reason,
                   slotInfo,
+                  failureMeta,
                 }),
               );
               setSolveOverlayState.entries = entries;
@@ -10507,17 +12151,28 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 ? result.failingRequirements
                 : [];
               const first = failing[0] ?? null;
+              const failureReason =
+                first?.label ??
+                first?.type ??
+                first?.keyNameNormalized ??
+                "No feasible squad with current player pool.";
+              const failureMeta = buildFailureMeta({
+                source: "solver",
+                challenge,
+                challengeName,
+                reason: failureReason,
+                failingRequirements: failing,
+                stats: result?.stats ?? null,
+              });
+              recordFailureMeta(failureMeta);
               entries.push(
                 makeEntryFromFailure({
                   challenge,
                   challengeName,
-                  reason:
-                    first?.label ??
-                    first?.type ??
-                    first?.keyNameNormalized ??
-                    "No feasible squad with current player pool.",
+                  reason: failureReason,
                   slotInfo,
                   stats: result?.stats ?? null,
+                  failureMeta,
                 }),
               );
             }
@@ -10535,7 +12190,6 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             entries.every((entry) => entry?.status === "solved");
           setSolveOverlayState.cycleResults = [];
           setSolveOverlayState.maxFeasibleCycles = fullSetSolved ? 1 : 0;
-          setSolveOverlayState.requestedSetCycles = 1;
           syncSetCycleControls();
 
           if (setSolveOverlayState.abortRequested) {
@@ -10615,12 +12269,21 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               !slotInfo.squadSlots.length
             ) {
               discardedReason = "Challenge slots unavailable.";
+              const failureMeta = buildFailureMeta({
+                source: "slot-unavailable",
+                challenge,
+                challengeName,
+                cycleIndex,
+                reason: discardedReason,
+              });
+              recordFailureMeta(failureMeta);
               cycleEntries.push(
                 makeEntryFromFailure({
                   challenge,
                   challengeName,
                   reason: discardedReason,
                   slotInfo,
+                  failureMeta,
                 }),
               );
               completedWork += 1;
@@ -10640,12 +12303,26 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               discardedReason =
                 notice?.reason ??
                 "Current exclusions conflict with challenge requirements.";
+              const conflictRules = collectPoolConflictFailureRequirements(
+                poolConflict,
+                safeRequirementsNormalized,
+              );
+              const failureMeta = buildFailureMeta({
+                source: "pool-conflict",
+                challenge,
+                challengeName,
+                cycleIndex,
+                reason: discardedReason,
+                failingRequirements: conflictRules,
+              });
+              recordFailureMeta(failureMeta);
               cycleEntries.push(
                 makeEntryFromFailure({
                   challenge,
                   challengeName,
                   reason: discardedReason,
                   slotInfo,
+                  failureMeta,
                 }),
               );
               showToast({
@@ -10698,6 +12375,16 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 first?.type ??
                 first?.keyNameNormalized ??
                 "No feasible squad with current player pool.";
+              const failureMeta = buildFailureMeta({
+                source: "solver",
+                challenge,
+                challengeName,
+                cycleIndex,
+                reason: discardedReason,
+                failingRequirements: failing,
+                stats: result?.stats ?? null,
+              });
+              recordFailureMeta(failureMeta);
               cycleEntries.push(
                 makeEntryFromFailure({
                   challenge,
@@ -10705,6 +12392,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   reason: discardedReason,
                   slotInfo,
                   stats: result?.stats ?? null,
+                  failureMeta,
                 }),
               );
               completedWork += 1;
@@ -10757,15 +12445,28 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               submitState: null,
             });
           } else {
+            const resolvedDiscardReason =
+              discardedReason ??
+              "Cycle discarded because one or more challenges failed.";
             cycleResults.push({
               cycleIndex,
               status: "discarded",
-              reason:
-                discardedReason ??
-                "Cycle discarded because one or more challenges failed.",
+              reason: resolvedDiscardReason,
               entries: cycleEntries,
               submitState: null,
             });
+            if (!setSolveOverlayState.abortRequested) {
+              const failedEntry = cycleEntries.find(
+                (entry) => entry?.status !== "solved",
+              );
+              const failedName = sanitizeDisplayText(
+                failedEntry?.challengeName,
+              );
+              const prefix = failedName
+                ? `Cycle ${cycleIndex} stopped at ${failedName}`
+                : `Cycle ${cycleIndex} stopped`;
+              setSolveOverlayState.generationStopReason = `${prefix}: ${resolvedDiscardReason} Later cycles were skipped due to pool depletion.`;
+            }
             // Monotonic pool assumption: once a cycle fails with depleted pool,
             // later cycles will not improve.
             break;
@@ -10794,10 +12495,6 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             Array.isArray(item?.entries) ? item.entries : [],
           );
         setSolveOverlayState.maxFeasibleCycles = solvedCycles;
-        setSolveOverlayState.requestedSetCycles = Math.max(
-          1,
-          solvedCycles || 1,
-        );
         syncSetCycleControls();
         renderEntries();
 
@@ -10828,6 +12525,16 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         }
       } catch (error) {
         log("debug", "[EA Data] Set solve generation failed", error);
+        const errorReason = String(error?.message || "Generation failed.");
+        setSolveOverlayState.latestFailureContext = {
+          source: "system",
+          reason: errorReason,
+          challengeId: null,
+          challengeName: null,
+          cycleIndex: null,
+          at: Date.now(),
+        };
+        setSolveOverlayState.generationStopReason = errorReason;
         setStatus(
           error?.message
             ? `Error: ${error.message}`
@@ -11018,6 +12725,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 );
               }
               entry.submitState = "submitted";
+              clearSetChallengeInfoPrefetchCache(startedSetId);
               submitted += 1;
               cycleSubmittedEntries += 1;
               processedEntries += 1;
@@ -11191,6 +12899,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                     );
                   }
                   entry.submitState = "submitted";
+                  clearSetChallengeInfoPrefetchCache(startedSetId);
                   submitted += 1;
                   cycleSubmittedEntries += 1;
                   processedEntries += 1;
@@ -11576,11 +13285,20 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       activeIndex: 0,
       sortKey: "rating_desc",
       multiSetEnabled: false,
+      requestedSetCyclesInput: 1,
       requestedSetCycles: 1,
       repeatabilityInfo: null,
       repeatabilityRemaining: null,
       repeatabilityMaxCycles: 1,
       maxFeasibleCycles: null,
+      requirementsByChallengeId: new Map(),
+      requirementsLoadToken: 0,
+      requirementsInFlight: new Set(),
+      rightPanelInitialized: false,
+      rightPanelLastSetId: null,
+      failureByChallengeId: new Map(),
+      latestFailureContext: null,
+      generationStopReason: null,
       running: false,
       mode: "idle",
       abortRequested: false,
@@ -11589,6 +13307,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       syncPoolSettings,
       syncSetCycleControls,
       syncSetCycleRepeatability,
+      renderRightPanel: renderSetSolveRightPanel,
+      refreshRequirements: refreshSetSolveRequirements,
     };
 
     const overlayTitle = overlay.querySelector("#ea-data-setsolve-title");
@@ -11606,21 +13326,46 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           overrideSetId ??
           readNumeric(currentSbcSet?.id) ??
           readNumeric(currentChallenge?.setId);
+        const targetSetKey = targetSetId == null ? null : String(targetSetId);
+        if (setSolveOverlayState) {
+          setSolveOverlayState.setId = targetSetKey;
+          setSolveOverlayState.availableChallenges = [];
+          setSolveOverlayState.selectedChallengeIds = null;
+          setSolveOverlayState.entries = [];
+          setSolveOverlayState.cycleResults = [];
+          setSolveOverlayState.activeIndex = 0;
+          ensureSetSolveRightPanelState();
+          setSolveOverlayState.requirementsLoadToken =
+            Number(setSolveOverlayState?.requirementsLoadToken ?? 0) + 1;
+          setSolveOverlayState.rightPanelLastSetId = targetSetKey;
+          setSolveOverlayState.requirementsByChallengeId?.clear?.();
+          setSolveOverlayState.requirementsInFlight?.clear?.();
+          renderSetSolveRightPanel({ reason: "picker-loading" });
+        }
+        renderEntries();
         if (targetSetId != null) {
           const challenges = await getSortedSetChallenges(targetSetId);
           if (setSolveOverlayState) {
+            setSolveOverlayState.setId = targetSetKey;
             setSolveOverlayState.availableChallenges = challenges;
             setSolveOverlayState.selectedChallengeIds = null;
           }
+          void refreshSetSolveRequirements(targetSetId, challenges);
           renderChallengePicker();
           syncSetCycleControls();
+        } else {
+          renderSetSolveRightPanel({ reason: "picker-no-set" });
         }
       } catch (err) {
         log("debug", "[EA Data] Picker challenge fetch failed", err);
+        renderSetSolveRightPanel({ reason: "picker-error" });
       }
     };
 
     setSolveOverlayState.populatePicker = populatePicker;
+    setSolveOverlayState.renderRightPanel = renderSetSolveRightPanel;
+    setSolveOverlayState.refreshRequirements = refreshSetSolveRequirements;
+    renderSetSolveRightPanel({ reason: "overlay-init" });
 
     if (currentSbcSet?.id != null || currentChallenge?.setId != null) {
       populatePicker();
@@ -11757,6 +13502,18 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     try {
       overlay.style.pointerEvents = "auto";
     } catch {}
+    try {
+      setSolveOverlayState?.renderRightPanel?.({ reason: "open" });
+    } catch {}
+    if (
+      previousChallengeKey === nextChallengeKey &&
+      previousSetKey === nextSetKey &&
+      setId != null
+    ) {
+      try {
+        void setSolveOverlayState?.populatePicker?.(setId);
+      } catch {}
+    }
   };
 
   const syncSetSolveButtonForSet = (button, setEntity) => {
@@ -14886,6 +16643,58 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     return true;
   };
 
+  const triggerAutoFetchForSet = (
+    setId,
+    { reason = "unknown", challengeId = null } = {},
+  ) => {
+    if (!autoFetchEnabled) return;
+    const normalizedSetId = readNumeric(setId);
+    if (normalizedSetId == null) return;
+    void prefetchSetChallengeInfo(normalizedSetId, {
+      reason: `${reason}-set-info`,
+    }).catch((error) => {
+      log("debug", "[EA Data] Set info prefetch failed", {
+        reason,
+        setId: normalizedSetId,
+        error,
+      });
+    });
+    if (autoFetchInFlight) return;
+    autoFetchInFlight = true;
+    log("debug", "[EA Data] Auto-fetch started", {
+      reason,
+      setId: normalizedSetId,
+      challengeId: challengeId ?? null,
+    });
+    window.eaData
+      ?.triggerFetch(
+        { ignoreLoaned: true, includeChallenges: false },
+        [normalizedSetId],
+        {
+          silent: true,
+        },
+      )
+      .then((data) => {
+        log("info", "[EA Data] Auto-fetch complete", {
+          reason,
+          setId: normalizedSetId,
+          club: data?.clubPlayers?.length ?? 0,
+          storage: data?.storagePlayers?.length ?? 0,
+          challenges: data?.sbcChallenges?.length ?? 0,
+        });
+      })
+      .catch((error) => {
+        log("debug", "[EA Data] Auto-fetch failed", {
+          reason,
+          setId: normalizedSetId,
+          error,
+        });
+      })
+      .finally(() => {
+        autoFetchInFlight = false;
+      });
+  };
+
   const hookSbcChallengePanel = () => {
     if (sbcPanelHooked) return true;
     if (typeof UTSBCSquadDetailPanelView === "undefined") return false;
@@ -14924,27 +16733,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           log("info", "[EA Data] SBC challenge opened", payload);
         }
 
-        if (isNewChallenge && autoFetchEnabled && !autoFetchInFlight) {
-          autoFetchInFlight = true;
-          log("debug", "[EA Data] Auto-fetch started", { setId });
-          window.eaData
-            ?.triggerFetch(
-              { ignoreLoaned: true, includeChallenges: false },
-              setId ? [setId] : [],
-              {
-                silent: true,
-              },
-            )
-            .then((data) => {
-              log("info", "[EA Data] Auto-fetch complete", {
-                club: data?.clubPlayers?.length ?? 0,
-                storage: data?.storagePlayers?.length ?? 0,
-                challenges: data?.sbcChallenges?.length ?? 0,
-              });
-            })
-            .finally(() => {
-              autoFetchInFlight = false;
-            });
+        if (isNewChallenge) {
+          triggerAutoFetchForSet(setId, {
+            reason: "challenge-open",
+            challengeId: challengeId ?? null,
+          });
         }
 
         if (currentChallenge && isNewChallenge) {
@@ -15046,6 +16839,18 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     proto.setSBCSet = function (setEntity, ...args) {
       const result = originalSetSbcSet.call(this, setEntity, ...args);
       try {
+        const setId = readNumeric(setEntity?.id) ?? null;
+        const isNewSet =
+          setId != null &&
+          (lastOpenedSetId == null || Number(lastOpenedSetId) !== Number(setId));
+        if (isNewSet) {
+          lastOpenedSetId = setId;
+          log("info", "[EA Data] SBC set opened", {
+            setId,
+            setName: setEntity?.name ?? null,
+          });
+          triggerAutoFetchForSet(setId, { reason: "set-open" });
+        }
         this.__eaDataLastSetSBCSetArgs = Array.isArray(args) ? args : [];
         this.__eaDataCurrentSetEntity = setEntity ?? null;
         currentSbcChallengesView = this ?? null;
@@ -15065,6 +16870,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           if (currentSbcChallengesView === this)
             currentSbcChallengesView = null;
           currentSbcSet = null;
+          lastOpenedSetId = null;
         } catch {}
         return result;
       };
@@ -15172,6 +16978,642 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     gameRewardsHooked = true;
     console.log("[EA Data] Game rewards view hook installed");
     return true;
+  };
+
+  const getViewRootElement = (view) => {
+    if (!view) return null;
+    try {
+      if (typeof view?.getRootElement === "function") {
+        const root = view.getRootElement();
+        if (root instanceof HTMLElement) return root;
+      }
+    } catch {}
+    const fallback = view?._root ?? view?.root ?? view?.element ?? null;
+    return fallback instanceof HTMLElement ? fallback : null;
+  };
+
+  const resolveCurrencyRootElement = (view) => {
+    if (!view) return null;
+    const currencies = view?.__currencies ?? null;
+    if (!currencies) return null;
+    try {
+      if (typeof currencies?.getRootElement === "function") {
+        const root = currencies.getRootElement();
+        if (root instanceof HTMLElement) return root;
+      }
+    } catch {}
+    const fallback =
+      currencies?._root ?? currencies?.root ?? currencies?.element ?? null;
+    return fallback instanceof HTMLElement ? fallback : null;
+  };
+
+  const resolveTitleRootElement = (view) => {
+    if (!view) return null;
+    const title = view?.__title ?? null;
+    if (!title) return null;
+    try {
+      if (typeof title?.getRootElement === "function") {
+        const root = title.getRootElement();
+        if (root instanceof HTMLElement) return root;
+      }
+    } catch {}
+    const fallback = title?._root ?? title?.root ?? title?.element ?? null;
+    return fallback instanceof HTMLElement ? fallback : null;
+  };
+
+  const getActiveTopbarNavRoot = () => {
+    const roots = Array.from(
+      document.querySelectorAll(
+        ".ut-navigation-bar-view, .navbar-style-landscape, .view-navbar",
+      ),
+    ).filter((node) => node instanceof HTMLElement && node.isConnected);
+    if (!roots.length) return null;
+    const visible = roots.find((node) => {
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+    return visible ?? roots[0];
+  };
+
+  const resolveTopbarNavRootFromView = (view) => {
+    const currencyRoot = resolveCurrencyRootElement(view);
+    if (currencyRoot instanceof HTMLElement) {
+      const rootFromCurrency = currencyRoot.closest(
+        ".ut-navigation-bar-view, .navbar-style-landscape, .view-navbar",
+      );
+      if (rootFromCurrency instanceof HTMLElement) return rootFromCurrency;
+    }
+    const viewRoot = getViewRootElement(view);
+    if (viewRoot instanceof HTMLElement) {
+      if (
+        viewRoot.matches?.(
+          ".ut-navigation-bar-view, .navbar-style-landscape, .view-navbar",
+        )
+      ) {
+        return viewRoot;
+      }
+      const nestedRoot = viewRoot.querySelector?.(
+        ".ut-navigation-bar-view, .navbar-style-landscape, .view-navbar",
+      );
+      if (nestedRoot instanceof HTMLElement) return nestedRoot;
+    }
+    return getActiveTopbarNavRoot();
+  };
+
+  const isLikelyTopbarTitle = (node) => {
+    if (!(node instanceof HTMLElement)) return false;
+    if (!node.isConnected) return false;
+    const text = (node.textContent ?? "").trim();
+    if (!text || text.length > 48) return false;
+    const rect = node.getBoundingClientRect();
+    if (!(rect.width > 0 && rect.height > 0)) return false;
+    // Top-bar titles live near the top-left area of the viewport.
+    if (rect.top < -8 || rect.top > 96) return false;
+    if (rect.left < 0 || rect.left > Math.max(520, window.innerWidth * 0.55))
+      return false;
+    return true;
+  };
+
+  const findTopbarTitleInsertionPoint = () => {
+    const titleCandidates = Array.from(
+      document.querySelectorAll(
+        ".ut-navigation-bar-view .title, .navbar-style-landscape .title, .view-navbar .title",
+      ),
+    ).filter((node) => node instanceof HTMLElement && node.isConnected);
+    const fallbackCandidates = Array.from(document.querySelectorAll(".title"))
+      .filter((node) => isLikelyTopbarTitle(node))
+      .filter((node) => node instanceof HTMLElement && node.isConnected);
+    const combined = titleCandidates.length ? titleCandidates : fallbackCandidates;
+    if (!combined.length) return null;
+    const visibleTitles = titleCandidates.filter((node) => {
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+    const visibleFallback = fallbackCandidates.filter((node) => {
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+    const pool = visibleTitles.length
+      ? visibleTitles
+      : visibleFallback.length
+        ? visibleFallback
+        : combined;
+    const leftMost = pool
+      .slice()
+      .sort(
+        (a, b) =>
+          a.getBoundingClientRect().left - b.getBoundingClientRect().left,
+      )[0];
+    if (!(leftMost instanceof HTMLElement)) return null;
+    if (!(leftMost.parentElement instanceof HTMLElement)) return null;
+    return {
+      parent: leftMost.parentElement,
+      beforeNode: leftMost.nextSibling,
+      title: leftMost,
+    };
+  };
+
+  const ensureTopbarSupportButtonAtTitle = (source = "title-inline") => {
+    ensureSolveButtonStyles();
+    const existing =
+      document.querySelector(EA_DATA_TOPBAR_SUPPORT_SELECTOR) ?? null;
+    const point = findTopbarTitleInsertionPoint();
+    const titleEl = point?.title instanceof HTMLElement ? point.title : null;
+    if (!(titleEl instanceof HTMLElement)) return false;
+    const wrap =
+      existing instanceof HTMLElement
+        ? existing
+        : createTopbarSupportButtonWrap();
+    try {
+      const previousTitle = wrap.closest(".title");
+      if (previousTitle instanceof HTMLElement && previousTitle !== titleEl) {
+        previousTitle.classList.remove("ea-data-topbar-title--with-support");
+      }
+      for (const titleNode of Array.from(
+        document.querySelectorAll(".ea-data-topbar-title--with-support"),
+      )) {
+        if (titleNode !== titleEl) {
+          try {
+            titleNode.classList.remove("ea-data-topbar-title--with-support");
+          } catch {}
+        }
+      }
+      if (wrap.classList.contains("ea-data-topbar-support-wrap--anchored")) {
+        wrap.classList.remove("ea-data-topbar-support-wrap--anchored");
+      }
+      if (!wrap.classList.contains("ea-data-topbar-support-wrap--inline")) {
+        wrap.classList.add("ea-data-topbar-support-wrap--inline");
+      }
+      if (!titleEl.classList.contains("ea-data-topbar-title--with-support")) {
+        titleEl.classList.add("ea-data-topbar-title--with-support");
+      }
+      if (wrap.parentElement !== titleEl) {
+        titleEl.appendChild(wrap);
+      }
+      if (
+        topbarSupportTooltipAnchorButton instanceof HTMLElement &&
+        !topbarSupportTooltipAnchorButton.isConnected
+      ) {
+        hideTopbarSupportTooltip({ immediate: true });
+      }
+      return true;
+    } catch (error) {
+      log("debug", "[EA Data] Top-bar support title attach failed", {
+        source,
+        error,
+      });
+      return false;
+    }
+  };
+
+  const ensureTopbarSupportTooltipElement = () => {
+    if (!(document.body instanceof HTMLElement)) return null;
+    if (topbarSupportTooltip instanceof HTMLElement && topbarSupportTooltip.isConnected) {
+      for (const existing of Array.from(
+        document.querySelectorAll(`.${EA_DATA_TOPBAR_SUPPORT_TOOLTIP_CLASS}`),
+      )) {
+        if (existing !== topbarSupportTooltip) {
+          try {
+            existing.remove();
+          } catch {}
+        }
+      }
+      return topbarSupportTooltip;
+    }
+    for (const existing of Array.from(
+      document.querySelectorAll(`.${EA_DATA_TOPBAR_SUPPORT_TOOLTIP_CLASS}`),
+    )) {
+      try {
+        existing.remove();
+      } catch {}
+    }
+    const tip = document.createElement("div");
+    tip.className = EA_DATA_TOPBAR_SUPPORT_TOOLTIP_CLASS;
+    tip.id = EA_DATA_TOPBAR_SUPPORT_TOOLTIP_ID;
+    tip.setAttribute("role", "tooltip");
+    tip.setAttribute("aria-hidden", "true");
+    const tipText = document.createElement("span");
+    tipText.className = "ea-data-topbar-support-tip__text";
+    tipText.textContent = EA_DATA_TOPBAR_SUPPORT_TOOLTIP_TEXT;
+    tip.append(tipText);
+    document.body.appendChild(tip);
+    topbarSupportTooltip = tip;
+    return tip;
+  };
+
+  const clearTopbarSupportTooltipTimers = () => {
+    if (topbarSupportTooltipTimer != null) {
+      try {
+        clearTimeout(topbarSupportTooltipTimer);
+      } catch {}
+      topbarSupportTooltipTimer = null;
+    }
+    if (topbarSupportTooltipHideTimer != null) {
+      try {
+        clearTimeout(topbarSupportTooltipHideTimer);
+      } catch {}
+      topbarSupportTooltipHideTimer = null;
+    }
+  };
+
+  const positionTopbarSupportTooltip = () => {
+    const tip = topbarSupportTooltip;
+    const button = topbarSupportTooltipAnchorButton;
+    if (!(tip instanceof HTMLElement) || !(button instanceof HTMLElement)) return;
+    if (!tip.isConnected || !button.isConnected) return;
+    const rect = button.getBoundingClientRect();
+    const viewportWidth = Math.max(
+      0,
+      window.innerWidth || document.documentElement?.clientWidth || 0,
+    );
+    const padding = 14;
+    const tipHalfWidth = 160;
+    const centerX = rect.left + rect.width / 2;
+    const clampedCenterX = Math.max(
+      padding + tipHalfWidth,
+      Math.min(viewportWidth - padding - tipHalfWidth, centerX),
+    );
+    const top = rect.bottom + 10;
+    tip.style.left = `${Math.round(clampedCenterX)}px`;
+    tip.style.top = `${Math.round(top)}px`;
+  };
+
+  const onTopbarSupportTooltipViewportChange = () => {
+    const tip = topbarSupportTooltip;
+    if (!(tip instanceof HTMLElement)) return;
+    if (!tip.classList.contains(EA_DATA_TOPBAR_SUPPORT_TOOLTIP_VISIBLE_CLASS))
+      return;
+    if (
+      !(topbarSupportTooltipAnchorButton instanceof HTMLElement) ||
+      !topbarSupportTooltipAnchorButton.isConnected
+    ) {
+      hideTopbarSupportTooltip({ immediate: true });
+      return;
+    }
+    positionTopbarSupportTooltip();
+  };
+
+  const attachTopbarSupportTooltipViewportListeners = () => {
+    if (topbarSupportTooltipViewportListenersAttached) return;
+    topbarSupportTooltipViewportListenersAttached = true;
+    try {
+      window.addEventListener("resize", onTopbarSupportTooltipViewportChange, {
+        passive: true,
+      });
+    } catch {}
+    try {
+      window.addEventListener("scroll", onTopbarSupportTooltipViewportChange, {
+        passive: true,
+        capture: true,
+      });
+    } catch {}
+  };
+
+  const detachTopbarSupportTooltipViewportListeners = () => {
+    if (!topbarSupportTooltipViewportListenersAttached) return;
+    topbarSupportTooltipViewportListenersAttached = false;
+    try {
+      window.removeEventListener("resize", onTopbarSupportTooltipViewportChange);
+    } catch {}
+    try {
+      window.removeEventListener("scroll", onTopbarSupportTooltipViewportChange, {
+        capture: true,
+      });
+    } catch {}
+  };
+
+  const hideTopbarSupportTooltip = ({ immediate = false } = {}) => {
+    clearTopbarSupportTooltipTimers();
+    const tip = topbarSupportTooltip;
+    if (!(tip instanceof HTMLElement)) return;
+    topbarSupportTooltipAnchorButton = null;
+    tip.classList.remove(EA_DATA_TOPBAR_SUPPORT_TOOLTIP_VISIBLE_CLASS);
+    tip.setAttribute("aria-hidden", "true");
+    detachTopbarSupportTooltipViewportListeners();
+    if (immediate) return;
+    topbarSupportTooltipHideTimer = setTimeout(() => {
+      topbarSupportTooltipHideTimer = null;
+      const currentTip = topbarSupportTooltip;
+      if (!(currentTip instanceof HTMLElement)) return;
+      if (
+        !currentTip.classList.contains(
+          EA_DATA_TOPBAR_SUPPORT_TOOLTIP_VISIBLE_CLASS,
+        ) &&
+        currentTip.parentElement === document.body
+      ) {
+        try {
+          currentTip.remove();
+        } catch {}
+      }
+      if (topbarSupportTooltip === currentTip) {
+        topbarSupportTooltip = null;
+      }
+    }, 220);
+  };
+
+  const scheduleTopbarSupportTooltip = (button, delayMs) => {
+    if (!(button instanceof HTMLElement)) return;
+    clearTopbarSupportTooltipTimers();
+    topbarSupportTooltipAnchorButton = button;
+    topbarSupportTooltipTimer = setTimeout(() => {
+      topbarSupportTooltipTimer = null;
+      if (
+        !(topbarSupportTooltipAnchorButton instanceof HTMLElement) ||
+        topbarSupportTooltipAnchorButton !== button ||
+        !button.isConnected
+      ) {
+        return;
+      }
+      const tip = ensureTopbarSupportTooltipElement();
+      if (!(tip instanceof HTMLElement)) return;
+      positionTopbarSupportTooltip();
+      attachTopbarSupportTooltipViewportListeners();
+      tip.classList.add(EA_DATA_TOPBAR_SUPPORT_TOOLTIP_VISIBLE_CLASS);
+      tip.setAttribute("aria-hidden", "false");
+    }, Math.max(80, Number(delayMs) || EA_DATA_TOPBAR_SUPPORT_HOVER_DELAY_MS));
+  };
+
+  const createTopbarSupportButtonWrap = () => {
+    const wrap = document.createElement("div");
+    wrap.className = EA_DATA_TOPBAR_SUPPORT_WRAP_CLASS;
+    wrap.setAttribute("data-ea-data-topbar-support", "true");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = EA_DATA_TOPBAR_SUPPORT_BUTTON_CLASS;
+    button.textContent = "Support My Work";
+    button.setAttribute("aria-label", "Support AutopilotSBC on Ko-fi");
+    button.setAttribute("aria-describedby", EA_DATA_TOPBAR_SUPPORT_TOOLTIP_ID);
+    button.addEventListener("pointerenter", () => {
+      scheduleTopbarSupportTooltip(button, EA_DATA_TOPBAR_SUPPORT_HOVER_DELAY_MS);
+    });
+    button.addEventListener("pointerleave", () => {
+      hideTopbarSupportTooltip();
+    });
+    button.addEventListener("focus", () => {
+      scheduleTopbarSupportTooltip(button, EA_DATA_TOPBAR_SUPPORT_FOCUS_DELAY_MS);
+    });
+    button.addEventListener("blur", () => {
+      hideTopbarSupportTooltip();
+    });
+    button.addEventListener("pointerdown", () => {
+      hideTopbarSupportTooltip();
+    });
+    button.addEventListener("keydown", (event) => {
+      if (event?.key === "Escape") hideTopbarSupportTooltip();
+    });
+    button.addEventListener("click", (event) => {
+      try {
+        event.preventDefault();
+        event.stopPropagation();
+      } catch {}
+      hideTopbarSupportTooltip({ immediate: true });
+      try {
+        window.open(EA_DATA_SUPPORT_URL, "_blank", "noopener,noreferrer");
+      } catch {}
+    });
+    wrap.append(button);
+    return wrap;
+  };
+
+  const injectTopbarSupportButtonForView = (view, source = "view") => {
+    if (!view) return false;
+    const inserted = ensureTopbarSupportButtonAtTitle(source);
+    if (!inserted) return false;
+    const wrap =
+      document.querySelector(EA_DATA_TOPBAR_SUPPORT_SELECTOR) ?? null;
+    if (wrap instanceof HTMLElement) {
+      topbarSupportWrapperByView.set(view, wrap);
+    }
+    return true;
+  };
+
+  const injectTopbarSupportButtonIntoNavRoot = (
+    navRoot,
+    { view = null, source = "unknown" } = {},
+  ) => {
+    if (!(navRoot instanceof HTMLElement) || !navRoot.isConnected) return false;
+    const inserted = ensureTopbarSupportButtonAtTitle(source);
+    if (!inserted) return false;
+    if (view) {
+      const wrap =
+        document.querySelector(EA_DATA_TOPBAR_SUPPORT_SELECTOR) ?? null;
+      if (wrap instanceof HTMLElement) {
+        topbarSupportWrapperByView.set(view, wrap);
+      }
+    }
+    return true;
+  };
+
+  const cleanupTopbarSupportButtonFromView = (view) => {
+    if (!view) return;
+    topbarSupportWrapperByView.delete(view);
+    if (
+      topbarSupportTooltipAnchorButton instanceof HTMLElement &&
+      !topbarSupportTooltipAnchorButton.isConnected
+    ) {
+      hideTopbarSupportTooltip({ immediate: true });
+    }
+  };
+
+  const scheduleTopbarSupportReflowBurst = (source = "burst") => {
+    topbarSupportReflowToken = (topbarSupportReflowToken ?? 0) + 1;
+    const token = topbarSupportReflowToken;
+    const run = (phase) => {
+      if (token !== topbarSupportReflowToken) return;
+      try {
+        refreshTopbarSupportButton(`${source}-${phase}`);
+      } catch {}
+    };
+    run("sync");
+    if (topbarSupportReflowRafId != null) return;
+    try {
+      topbarSupportReflowRafId = requestAnimationFrame(() => {
+        topbarSupportReflowRafId = null;
+        run("raf");
+      });
+    } catch {
+      topbarSupportReflowRafId = null;
+    }
+  };
+
+  const refreshTopbarSupportButton = (source = "observer") => {
+    return ensureTopbarSupportButtonAtTitle(`${source}-title`);
+  };
+
+  const resolveTopbarSupportObserverRoot = () => {
+    const titlePoint = findTopbarTitleInsertionPoint();
+    if (titlePoint?.parent instanceof HTMLElement) {
+      return titlePoint.parent;
+    }
+    const navRoot = getActiveTopbarNavRoot();
+    return navRoot instanceof HTMLElement ? navRoot : null;
+  };
+
+  const nodeTouchesTopbarNav = (node) => {
+    if (!(node instanceof Element)) return false;
+    try {
+      if (
+        node.matches?.(
+          ".ut-navigation-bar-view, .navbar-style-landscape, .view-navbar, .title",
+        )
+      ) {
+        return true;
+      }
+      return Boolean(
+        node.querySelector?.(
+          ".ut-navigation-bar-view, .navbar-style-landscape, .view-navbar, .title",
+        ),
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  const ensureTopbarSupportDocumentObserver = () => {
+    if (topbarSupportDocumentObserverStarted) return;
+    if (typeof MutationObserver !== "function") return;
+    if (!(document.body instanceof HTMLElement)) return;
+    topbarSupportDocumentObserverStarted = true;
+    topbarSupportDocumentObserver = new MutationObserver((mutations) => {
+      let touchesTopbar = false;
+      for (const mutation of mutations ?? []) {
+        if (mutation?.type !== "childList") continue;
+        for (const added of Array.from(mutation.addedNodes ?? [])) {
+          if (nodeTouchesTopbarNav(added)) {
+            touchesTopbar = true;
+            break;
+          }
+        }
+        if (touchesTopbar) break;
+        for (const removed of Array.from(mutation.removedNodes ?? [])) {
+          if (nodeTouchesTopbarNav(removed)) {
+            touchesTopbar = true;
+            break;
+          }
+        }
+        if (touchesTopbar) break;
+      }
+      if (!touchesTopbar) return;
+      ensureTopbarSupportObserver();
+      scheduleTopbarSupportReflowBurst("observer-document");
+    });
+    topbarSupportDocumentObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  };
+
+  const ensureTopbarSupportObserver = () => {
+    if (typeof MutationObserver !== "function") return;
+    const root = resolveTopbarSupportObserverRoot();
+    if (!(root instanceof HTMLElement)) return;
+    const sameRoot = topbarSupportObserverRoot === root;
+    if (topbarSupportObserverStarted && sameRoot && topbarSupportObserver) {
+      return;
+    }
+    if (topbarSupportObserver) {
+      try {
+        topbarSupportObserver.disconnect();
+      } catch {}
+    }
+    topbarSupportObserverStarted = true;
+    topbarSupportObserverRoot = root;
+    topbarSupportObserver = new MutationObserver(() => {
+      scheduleTopbarSupportReflowBurst("observer-mutation");
+    });
+    topbarSupportObserver.observe(root, {
+      childList: true,
+      subtree: true,
+    });
+    scheduleTopbarSupportReflowBurst("observer-init");
+  };
+
+  const hookCurrencyNavigationBarView = () => {
+    if (currencyNavBarHooked) return true;
+    if (typeof UTCurrencyNavigationBarView === "undefined") return false;
+    const proto = UTCurrencyNavigationBarView.prototype;
+    if (!proto || proto.__eaDataCurrencyNavBarHooked) return true;
+    const originalGenerate = proto._generate;
+    if (typeof originalGenerate !== "function") return false;
+    const originalDestroy = proto.destroyGeneratedElements;
+
+    proto._generate = function (...args) {
+      const result = originalGenerate.call(this, ...args);
+      try {
+        const injectInline = () => {
+          ensureTopbarSupportObserver();
+          if (injectTopbarSupportButtonForView(this, "currency-navbar-generate")) {
+            return true;
+          }
+          const navRoot = resolveTopbarNavRootFromView(this);
+          if (navRoot instanceof HTMLElement) {
+            return injectTopbarSupportButtonIntoNavRoot(navRoot, {
+              view: this,
+              source: "currency-navbar-generate-fallback",
+            });
+          }
+          return false;
+        };
+        injectInline();
+        try {
+          requestAnimationFrame(() => {
+            injectInline();
+          });
+        } catch {
+          injectInline();
+        }
+      } catch (error) {
+        log("debug", "[EA Data] Currency nav hook inject failed", error);
+      }
+      return result;
+    };
+
+    if (typeof originalDestroy === "function") {
+      proto.destroyGeneratedElements = function (...args) {
+        const result = originalDestroy.call(this, ...args);
+        try {
+          cleanupTopbarSupportButtonFromView(this);
+        } catch {}
+        return result;
+      };
+    }
+
+    proto.__eaDataCurrencyNavBarHooked = true;
+    currencyNavBarHooked = true;
+    console.log("[EA Data] Currency navbar hook installed");
+    return true;
+  };
+
+  const startTopbarSupportHookPolling = () => {
+    ensureTopbarSupportDocumentObserver();
+    ensureTopbarSupportObserver();
+    if (!topbarSupportResizeHooked) {
+      topbarSupportResizeHooked = true;
+      try {
+        window.addEventListener(
+          "resize",
+          () => {
+            scheduleTopbarSupportReflowBurst("window-resize");
+            ensureTopbarSupportObserver();
+          },
+          { passive: true },
+        );
+      } catch {}
+    }
+    scheduleTopbarSupportReflowBurst("topbar-boot");
+    refreshTopbarSupportButton("topbar-immediate");
+    const intervalId = setInterval(() => {
+      const navReady = hookCurrencyNavigationBarView();
+      const inserted = refreshTopbarSupportButton("topbar-poll");
+      ensureTopbarSupportDocumentObserver();
+      ensureTopbarSupportObserver();
+      if (navReady && inserted) clearInterval(intervalId);
+    }, 300);
+    setTimeout(() => {
+      try {
+        clearInterval(intervalId);
+      } catch {}
+    }, 15000);
   };
 
   const startSbcHookPolling = () => {
@@ -15480,6 +17922,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 
   startSbcHookPolling();
   startAppSettingsHookPolling();
+  try {
+    startTopbarSupportHookPolling();
+  } catch (error) {
+    log("debug", "[EA Data] Top-bar support hook failed to start", error);
+  }
   scheduleSolverBridgeInit();
 
   const logResult = (label, data) => {
