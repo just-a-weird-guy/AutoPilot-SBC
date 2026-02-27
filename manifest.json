@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "AutopilotSBC",
+  "name": "AutopilotSBC | FC26 SBC Solver",
   "version": "1.0",
   "description": "automation tool for solving SBCs in the EA SPORTS FC Web App.",
   "icons": {
