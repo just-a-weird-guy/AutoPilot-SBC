@@ -1101,6 +1101,7 @@
       Array.isArray(slotIds) &&
       slotIndices.length &&
       slotIndices.length === slotIds.length;
+    const directedSlotIndexSet = new Set();
 
     if (slotDirected) {
       const placements = [];
@@ -1113,6 +1114,7 @@
         if (!Number.isFinite(slotIndex)) continue;
         if (slotIndex < 0 || slotIndex >= list.length) continue;
         placements.push([slotIndex, rawId]);
+        directedSlotIndexSet.add(slotIndex);
       }
 
       placements.sort((a, b) => a[0] - b[0]);
@@ -1132,6 +1134,22 @@
       (id) => !usedIds.has(id) && !usedIds.has(String(id)),
     );
     let cursor = 0;
+    if (slotDirected && directedSlotIndexSet.size) {
+      const directedSlotIndices = Array.from(directedSlotIndexSet).sort(
+        (a, b) => a - b,
+      );
+      for (const slotIndex of directedSlotIndices) {
+        if (list[slotIndex]) continue;
+        if (cursor >= remainingIds.length) break;
+        const id = remainingIds[cursor];
+        const item = resolveIdToItem(id);
+        list[slotIndex] = item;
+        markUsed(item);
+        cursor += 1;
+      }
+      return list;
+    }
+
     for (let index = 0; index < list.length; index += 1) {
       if (list[index]) continue;
       if (cursor >= remainingIds.length) break;
@@ -1208,6 +1226,26 @@
     if (!challenge?.squad) return [];
     const lookupKey = options.lookupKey ?? "id";
     const playerById = options?.playerById ?? null;
+    // ── Per-apply-run lookup cache ──────────────────────────────────────────
+    // Each getSquadLookupForSbc call fetches ALL club + storage items via
+    // paginated API.  Within a single apply run the inventory only changes
+    // when moveItemsToClub actually moves items between piles.  By caching
+    // the result and forcing a refresh only after a confirmed move we cut
+    // most apply runs from 1-4 full scans down to 1.
+    const lookupOpts = {
+      ignoreLoaned: true,
+      excludeActiveSquad: true,
+      raw: true,
+      skipStats: true,
+    };
+    let cachedLookup = null;
+    let lookupFetchCount = 0;
+    const getCachedLookup = async (force = false) => {
+      if (cachedLookup && !force) return cachedLookup;
+      cachedLookup = await getSquadLookupForSbc(lookupKey, lookupOpts);
+      lookupFetchCount += 1;
+      return cachedLookup;
+    };
     const getPlayerFromIdMap = (id) => {
       if (!playerById || id == null) return null;
       const key = String(id);
@@ -1251,12 +1289,7 @@
         }
       }
     } catch {}
-    const lookup = await getSquadLookupForSbc(lookupKey, {
-      ignoreLoaned: true,
-      excludeActiveSquad: true,
-      raw: true,
-      skipStats: true,
-    });
+    const lookup = await getCachedLookup();
     const ItemPile =
       services?.Item?.UTItemPileEnum ?? window?.UTItemPileEnum ?? {};
     const clubPile = ItemPile.CLUB ?? 7;
@@ -1570,6 +1603,7 @@
         applied: appliedItems.length,
         slotCount: slots.length,
         conceptCount,
+        lookupFetches: lookupFetchCount,
         missingAfterApply,
         missingDetails,
         missingByDefinition,
@@ -1621,12 +1655,7 @@
     );
     const movedCount = await moveItemsToClub(moveCandidates);
     if (movedCount > 0) {
-      const refreshedLookup = await getSquadLookupForSbc(lookupKey, {
-        ignoreLoaned: true,
-        excludeActiveSquad: true,
-        raw: true,
-        skipStats: true,
-      });
+      const refreshedLookup = await getCachedLookup(true);
       applyLookup.clear();
       for (const id of applyIds || []) {
         const match =
@@ -1684,12 +1713,7 @@
       [];
     const attemptSummary = summarizeSquad(attemptSlots, "apply");
     if (attemptSummary?.missingAfterApply?.length) {
-      const refreshedLookup = await getSquadLookupForSbc(lookupKey, {
-        ignoreLoaned: true,
-        excludeActiveSquad: true,
-        raw: true,
-        skipStats: true,
-      });
+      const refreshedLookup = await getCachedLookup();
       const missingItems = attemptSummary.missingAfterApply
         .map(
           (id) =>
@@ -1700,12 +1724,7 @@
         .filter(Boolean);
       const movedMissing = await moveItemsToClub(missingItems);
       if (movedMissing > 0) {
-        const updatedLookup = await getSquadLookupForSbc(lookupKey, {
-          ignoreLoaned: true,
-          excludeActiveSquad: true,
-          raw: true,
-          skipStats: true,
-        });
+        const updatedLookup = await getCachedLookup(true);
         applyLookup.clear();
         for (const id of applyIds || []) {
           const match =
@@ -1907,7 +1926,9 @@
       at: Date.now(),
       reason: existing?.reason ?? "upsert",
       setId: normalizedSetId,
-      challenges: Array.isArray(existing?.challenges) ? existing.challenges : [],
+      challenges: Array.isArray(existing?.challenges)
+        ? existing.challenges
+        : [],
       requirementsByChallengeId,
     });
   };
@@ -1932,7 +1953,9 @@
       if (cached) {
         return {
           setId: normalizedSetId,
-          challenges: Array.isArray(cached?.challenges) ? cached.challenges : [],
+          challenges: Array.isArray(cached?.challenges)
+            ? cached.challenges
+            : [],
           requirementsByChallengeId:
             cached?.requirementsByChallengeId instanceof Map
               ? cached.requirementsByChallengeId
@@ -1959,7 +1982,10 @@
         let source = "snapshot-local";
         try {
           const loaded = await loadChallenge(challenge, true, { force: true });
-          snapshot = buildRequirementsSnapshot(challenge, loaded?.data ?? loaded);
+          snapshot = buildRequirementsSnapshot(
+            challenge,
+            loaded?.data ?? loaded,
+          );
           source = "snapshot-loaded";
         } catch {}
         requirementsByChallengeId.set(challengeId, {
@@ -2790,8 +2816,8 @@
     const normalizedSlots = Array.isArray(slots)
       ? slots.map(normalizeSlotForSolver)
       : [];
-    const fieldSlots = normalizedSlots.filter((slot) =>
-      Boolean(slot?.positionName),
+    const fieldSlots = normalizedSlots.filter(
+      (slot) => Boolean(slot?.positionName) && slot?.isBrick !== true,
     );
     const take =
       typeof requiredPlayers === "number" && requiredPlayers > 0
@@ -9198,7 +9224,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const challengePickerWrap = overlay.querySelector(
       "#ea-data-setsolve-challenge-picker",
     );
-    const rightPanelWrap = overlay.querySelector("#ea-data-setsolve-right-panel");
+    const rightPanelWrap = overlay.querySelector(
+      "#ea-data-setsolve-right-panel",
+    );
     const closeBtn = overlay.querySelector('[data-action="close"]');
     const cancelBtn = overlay.querySelector('[data-action="cancel"]');
     const generateBtn = overlay.querySelector('[data-action="generate"]');
@@ -9596,7 +9624,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         rightPanelWrap.setAttribute("data-panel-reason", String(reason));
       } catch {}
 
-      const challenges = Array.isArray(setSolveOverlayState?.availableChallenges)
+      const challenges = Array.isArray(
+        setSolveOverlayState?.availableChallenges,
+      )
         ? setSolveOverlayState.availableChallenges
         : [];
       const selectedIds = setSolveOverlayState?.selectedChallengeIds;
@@ -9632,8 +9662,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const useCycleSummary =
         isMultiModeActive &&
         cycleResults.some(
-        (cycle) => Array.isArray(cycle?.entries) && cycle.entries.length > 0,
-      );
+          (cycle) => Array.isArray(cycle?.entries) && cycle.entries.length > 0,
+        );
       const summaryEntries = useCycleSummary
         ? cycleResults.flatMap((cycle) =>
             Array.isArray(cycle?.entries) ? cycle.entries : [],
@@ -9761,7 +9791,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       }
       rightPanelWrap.append(summary);
 
-      const showFailureSection = latestFailureContext != null || generationStopReason;
+      const showFailureSection =
+        latestFailureContext != null || generationStopReason;
       if (showFailureSection) {
         const failureSection = createSetSolveInfoSection("Latest Failure");
         if (latestFailureContext) {
@@ -9811,12 +9842,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         reqList.append(empty);
       } else {
         for (const challenge of challenges) {
-          const challengeId = challenge?.id == null ? null : String(challenge.id);
+          const challengeId =
+            challenge?.id == null ? null : String(challenge.id);
           if (!challengeId) continue;
           const challengeName =
-            challenge?.name ??
-            challenge?.title ??
-            `Challenge ${challengeId}`;
+            challenge?.name ?? challenge?.title ?? `Challenge ${challengeId}`;
           const cached = requirementsById.get(challengeId) ?? null;
           const challengeFailures = failureByChallengeId.get(challengeId);
           const failureHistory = Array.isArray(challengeFailures)
@@ -9954,7 +9984,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       setSolveOverlayState.rightPanelInitialized = true;
     };
 
-    const refreshSetSolveRequirements = async (setId, challengesInput = null) => {
+    const refreshSetSolveRequirements = async (
+      setId,
+      challengesInput = null,
+    ) => {
       ensureSetSolveRightPanelState();
       const state = setSolveOverlayState ?? null;
       if (!state) return;
@@ -9974,9 +10007,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             : []
       ).filter(Boolean);
       const requirementsById = state.requirementsByChallengeId;
-      const prefetchedRequirementsById = getPrefetchedSetRequirementsByChallengeId(
-        targetSetId,
-      );
+      const prefetchedRequirementsById =
+        getPrefetchedSetRequirementsByChallengeId(targetSetId);
 
       if (!(requirementsById instanceof Map)) return;
       if (state.rightPanelLastSetId !== setKey) {
@@ -10006,10 +10038,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         if (!challengeId) continue;
         validIds.add(challengeId);
         const challengeName =
-          challenge?.name ??
-          challenge?.title ??
-          `Challenge ${challengeId}`;
-        const prefetched = prefetchedRequirementsById?.get?.(challengeId) ?? null;
+          challenge?.name ?? challenge?.title ?? `Challenge ${challengeId}`;
+        const prefetched =
+          prefetchedRequirementsById?.get?.(challengeId) ?? null;
         const hasPrefetchedSnapshot =
           prefetched?.snapshot && typeof prefetched.snapshot === "object";
         const snapshot = hasPrefetchedSnapshot
@@ -10038,9 +10069,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         const challengeId = challenge?.id == null ? null : String(challenge.id);
         if (!challengeId) continue;
         const challengeName =
-          challenge?.name ??
-          challenge?.title ??
-          `Challenge ${challengeId}`;
+          challenge?.name ?? challenge?.title ?? `Challenge ${challengeId}`;
         state.requirementsInFlight.add(challengeId);
         renderSetSolveRightPanel({ reason: "requirements-loading" });
         try {
@@ -11897,7 +11926,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               ? setSolveOverlayState.failureByChallengeId.get(challengeId)
               : [];
             const nextList = currentList.concat(failureMeta).slice(-30);
-            setSolveOverlayState.failureByChallengeId.set(challengeId, nextList);
+            setSolveOverlayState.failureByChallengeId.set(
+              challengeId,
+              nextList,
+            );
           }
           setSolveOverlayState.latestFailureContext = {
             source: failureMeta?.source ?? "solver",
@@ -13852,6 +13884,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             ? payload.filters
             : {}),
           ...poolFilters,
+          // Single-solve preserves occupied field slots during apply,
+          // so keep those players hard-locked through solver optimization.
+          preserveOccupiedSlots: true,
         };
         const result = await callSolverBridge(
           "SOLVE",
@@ -13949,12 +13984,43 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           }
 
           updateLoadingOverlay("Applying squad...");
+          const resolvedSlotSolution = (() => {
+            const fromSolver = result?.solutionSlots?.[0] ?? null;
+            if (
+              fromSolver &&
+              Array.isArray(fromSolver.fieldSlotIndices) &&
+              Array.isArray(fromSolver.fieldSlotToPlayerId) &&
+              fromSolver.fieldSlotIndices.length ===
+                fromSolver.fieldSlotToPlayerId.length
+            ) {
+              return fromSolver;
+            }
+            const fieldSlotIndices = (payload?.squadSlots ?? [])
+              .map((slot) => {
+                const index = readNumeric(slot?.slotIndex);
+                return Number.isFinite(index) ? index : null;
+              })
+              .filter((index) => index != null);
+            const solutionIds = Array.isArray(result?.solutions?.[0])
+              ? result.solutions[0]
+              : [];
+            if (
+              fieldSlotIndices.length &&
+              fieldSlotIndices.length === solutionIds.length
+            ) {
+              return {
+                fieldSlotIndices,
+                fieldSlotToPlayerId: solutionIds.slice(),
+              };
+            }
+            return null;
+          })();
           await applySolutionToChallenge(
             currentChallenge,
             result.solutions[0],
             {
               lookupKey: "id",
-              slotSolution: result?.solutionSlots?.[0] ?? null,
+              slotSolution: resolvedSlotSolution,
               playerById: new Map(
                 (payload?.players ?? [])
                   .map((p) => [p?.id != null ? String(p.id) : null, p])
@@ -13989,6 +14055,81 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           console.log("[EA Data] No feasible squad", {
             failingRequirements: failing,
           });
+          let blockedByOccupiedSlots = false;
+          const hasOccupiedFieldSlots = (payload?.squadSlots ?? []).some(
+            (slot) => {
+              const item = slot?.item ?? null;
+              const id = item?.id ?? null;
+              const concept = Boolean(item?.concept);
+              return id != null && id !== 0 && !concept;
+            },
+          );
+          if (
+            hasOccupiedFieldSlots &&
+            Boolean(mergedFilters?.preserveOccupiedSlots) &&
+            (startedChallengeId == null ||
+              currentChallenge?.id === startedChallengeId)
+          ) {
+            try {
+              updateLoadingOverlay("Checking occupied-slot constraints...");
+              const diagnosticSquadSlots = (payload?.squadSlots ?? []).map(
+                (slot) => {
+                  const item = slot?.item ?? null;
+                  const id = item?.id ?? null;
+                  const concept = Boolean(item?.concept);
+                  const hasItem = id != null && id !== 0 && !concept;
+                  if (!hasItem) return slot;
+                  // Simulate "clear squad and retry" while preserving slot structure.
+                  return {
+                    ...slot,
+                    isValid: false,
+                    item: null,
+                  };
+                },
+              );
+              const diagnosticResult = await callSolverBridge(
+                "SOLVE",
+                {
+                  players: filteredPlayers,
+                  requirements: safeRequirements,
+                  requirementsNormalized: safeRequirementsNormalized,
+                  requiredPlayers: payload.requiredPlayers ?? null,
+                  squadSlots: diagnosticSquadSlots,
+                  prioritize: payload.prioritize,
+                  filters: {
+                    ...mergedFilters,
+                    preserveOccupiedSlots: false,
+                  },
+                  debug: debugEnabled,
+                },
+                SOLVER_BRIDGE_TIMEOUT_MS,
+              );
+              blockedByOccupiedSlots = Array.isArray(
+                diagnosticResult?.solutions,
+              )
+                ? diagnosticResult.solutions.length > 0
+                : false;
+              console.log("[EA Data] Occupied-slot diagnostic", {
+                blockedByOccupiedSlots,
+                diagnosticSolutions: diagnosticResult?.solutions?.length ?? 0,
+              });
+            } catch (diagnosticError) {
+              console.log(
+                "[EA Data] Occupied-slot diagnostic failed",
+                diagnosticError,
+              );
+            }
+          }
+          if (blockedByOccupiedSlots) {
+            showToast({
+              type: "error",
+              title: "Occupied Slots Blocking Solve",
+              message:
+                "Current slotted players are blocking a valid solution. Clear the squad and try again.",
+              timeoutMs: 9000,
+            });
+            return;
+          }
           showToast({
             type: "error",
             title: "No Feasible Squad",
@@ -16866,7 +17007,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         const setId = readNumeric(setEntity?.id) ?? null;
         const isNewSet =
           setId != null &&
-          (lastOpenedSetId == null || Number(lastOpenedSetId) !== Number(setId));
+          (lastOpenedSetId == null ||
+            Number(lastOpenedSetId) !== Number(setId));
         if (isNewSet) {
           lastOpenedSetId = setId;
           log("info", "[EA Data] SBC set opened", {
@@ -17107,7 +17249,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const fallbackCandidates = Array.from(document.querySelectorAll(".title"))
       .filter((node) => isLikelyTopbarTitle(node))
       .filter((node) => node instanceof HTMLElement && node.isConnected);
-    const combined = titleCandidates.length ? titleCandidates : fallbackCandidates;
+    const combined = titleCandidates.length
+      ? titleCandidates
+      : fallbackCandidates;
     if (!combined.length) return null;
     const visibleTitles = titleCandidates.filter((node) => {
       const rect = node.getBoundingClientRect();
@@ -17192,7 +17336,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 
   const ensureTopbarSupportTooltipElement = () => {
     if (!(document.body instanceof HTMLElement)) return null;
-    if (topbarSupportTooltip instanceof HTMLElement && topbarSupportTooltip.isConnected) {
+    if (
+      topbarSupportTooltip instanceof HTMLElement &&
+      topbarSupportTooltip.isConnected
+    ) {
       for (const existing of Array.from(
         document.querySelectorAll(`.${EA_DATA_TOPBAR_SUPPORT_TOOLTIP_CLASS}`),
       )) {
@@ -17243,7 +17390,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
   const positionTopbarSupportTooltip = () => {
     const tip = topbarSupportTooltip;
     const button = topbarSupportTooltipAnchorButton;
-    if (!(tip instanceof HTMLElement) || !(button instanceof HTMLElement)) return;
+    if (!(tip instanceof HTMLElement) || !(button instanceof HTMLElement))
+      return;
     if (!tip.isConnected || !button.isConnected) return;
     const rect = button.getBoundingClientRect();
     const viewportWidth = Math.max(
@@ -17297,12 +17445,19 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     if (!topbarSupportTooltipViewportListenersAttached) return;
     topbarSupportTooltipViewportListenersAttached = false;
     try {
-      window.removeEventListener("resize", onTopbarSupportTooltipViewportChange);
+      window.removeEventListener(
+        "resize",
+        onTopbarSupportTooltipViewportChange,
+      );
     } catch {}
     try {
-      window.removeEventListener("scroll", onTopbarSupportTooltipViewportChange, {
-        capture: true,
-      });
+      window.removeEventListener(
+        "scroll",
+        onTopbarSupportTooltipViewportChange,
+        {
+          capture: true,
+        },
+      );
     } catch {}
   };
 
@@ -17339,22 +17494,25 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     if (!(button instanceof HTMLElement)) return;
     clearTopbarSupportTooltipTimers();
     topbarSupportTooltipAnchorButton = button;
-    topbarSupportTooltipTimer = setTimeout(() => {
-      topbarSupportTooltipTimer = null;
-      if (
-        !(topbarSupportTooltipAnchorButton instanceof HTMLElement) ||
-        topbarSupportTooltipAnchorButton !== button ||
-        !button.isConnected
-      ) {
-        return;
-      }
-      const tip = ensureTopbarSupportTooltipElement();
-      if (!(tip instanceof HTMLElement)) return;
-      positionTopbarSupportTooltip();
-      attachTopbarSupportTooltipViewportListeners();
-      tip.classList.add(EA_DATA_TOPBAR_SUPPORT_TOOLTIP_VISIBLE_CLASS);
-      tip.setAttribute("aria-hidden", "false");
-    }, Math.max(80, Number(delayMs) || EA_DATA_TOPBAR_SUPPORT_HOVER_DELAY_MS));
+    topbarSupportTooltipTimer = setTimeout(
+      () => {
+        topbarSupportTooltipTimer = null;
+        if (
+          !(topbarSupportTooltipAnchorButton instanceof HTMLElement) ||
+          topbarSupportTooltipAnchorButton !== button ||
+          !button.isConnected
+        ) {
+          return;
+        }
+        const tip = ensureTopbarSupportTooltipElement();
+        if (!(tip instanceof HTMLElement)) return;
+        positionTopbarSupportTooltip();
+        attachTopbarSupportTooltipViewportListeners();
+        tip.classList.add(EA_DATA_TOPBAR_SUPPORT_TOOLTIP_VISIBLE_CLASS);
+        tip.setAttribute("aria-hidden", "false");
+      },
+      Math.max(80, Number(delayMs) || EA_DATA_TOPBAR_SUPPORT_HOVER_DELAY_MS),
+    );
   };
 
   const createTopbarSupportButtonWrap = () => {
@@ -17368,13 +17526,19 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     button.setAttribute("aria-label", "Support AutopilotSBC on Ko-fi");
     button.setAttribute("aria-describedby", EA_DATA_TOPBAR_SUPPORT_TOOLTIP_ID);
     button.addEventListener("pointerenter", () => {
-      scheduleTopbarSupportTooltip(button, EA_DATA_TOPBAR_SUPPORT_HOVER_DELAY_MS);
+      scheduleTopbarSupportTooltip(
+        button,
+        EA_DATA_TOPBAR_SUPPORT_HOVER_DELAY_MS,
+      );
     });
     button.addEventListener("pointerleave", () => {
       hideTopbarSupportTooltip();
     });
     button.addEventListener("focus", () => {
-      scheduleTopbarSupportTooltip(button, EA_DATA_TOPBAR_SUPPORT_FOCUS_DELAY_MS);
+      scheduleTopbarSupportTooltip(
+        button,
+        EA_DATA_TOPBAR_SUPPORT_FOCUS_DELAY_MS,
+      );
     });
     button.addEventListener("blur", () => {
       hideTopbarSupportTooltip();
@@ -17566,7 +17730,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       try {
         const injectInline = () => {
           ensureTopbarSupportObserver();
-          if (injectTopbarSupportButtonForView(this, "currency-navbar-generate")) {
+          if (
+            injectTopbarSupportButtonForView(this, "currency-navbar-generate")
+          ) {
             return true;
           }
           const navRoot = resolveTopbarNavRootFromView(this);
@@ -18246,8 +18412,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           const normalizedSlots = Array.isArray(slots)
             ? slots.map(normalizeSlotForSolver)
             : [];
-          const fieldSlots = normalizedSlots.filter((slot) =>
-            Boolean(slot?.positionName),
+          const fieldSlots = normalizedSlots.filter(
+            (slot) => Boolean(slot?.positionName) && slot?.isBrick !== true,
           );
           const take =
             typeof requiredPlayers === "number" && requiredPlayers > 0

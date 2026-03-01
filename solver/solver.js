@@ -418,6 +418,10 @@ export const buildSolverContext = ({
     onlyDuplicates: toBooleanSetting(filters?.onlyDuplicates, false),
     excludeSpecial: toBooleanSetting(filters?.excludeSpecial, false),
     useEvolutionPlayers: toBooleanSetting(filters?.useEvolutionPlayers, false),
+    preserveOccupiedSlots: toBooleanSetting(
+      filters?.preserveOccupiedSlots,
+      false,
+    ),
   };
 
   let normalizedPlayers = normalizePlayers(players);
@@ -1353,6 +1357,8 @@ const isRatingImproveMetricsBetter = (candidate, current, options = {}) => {
   const k = current.preservation;
   if (preferLowerExcessInforms && c.excessInforms !== k.excessInforms)
     return c.excessInforms < k.excessInforms;
+  if (c.excessSpecials !== k.excessSpecials)
+    return c.excessSpecials < k.excessSpecials;
   if (c.highScore !== k.highScore) return c.highScore < k.highScore;
   if (c.highCount !== k.highCount) return c.highCount < k.highCount;
   if (c.maxRating !== k.maxRating) return c.maxRating < k.maxRating;
@@ -1751,9 +1757,11 @@ const getSquadPreservationMetrics = (
   ratingTarget,
   pivot,
   requiredInforms = 0,
+  requiredSpecials = 0,
 ) => {
   const pivotNumber = toNumber(pivot) ?? 84;
   const requiredInformsNumber = Math.max(0, toNumber(requiredInforms) ?? 0);
+  const requiredSpecialsNumber = Math.max(0, toNumber(requiredSpecials) ?? 0);
   const ratings = (squad || []).map((player) => toNumber(player?.rating) ?? 0);
   const maxRating = ratings.reduce((max, rating) => Math.max(max, rating), 0);
   const sumRating = ratings.reduce((sum, rating) => sum + rating, 0);
@@ -1761,7 +1769,12 @@ const getSquadPreservationMetrics = (
     (count, player) => (isInformPlayer(player) ? count + 1 : count),
     0,
   );
+  const specialCount = (squad || []).reduce(
+    (count, player) => (player?.isSpecial ? count + 1 : count),
+    0,
+  );
   const excessInforms = Math.max(0, informCount - requiredInformsNumber);
+  const excessSpecials = Math.max(0, specialCount - requiredSpecialsNumber);
   const highCount = ratings.reduce(
     (count, rating) => (rating > pivotNumber ? count + 1 : count),
     0,
@@ -1781,8 +1794,11 @@ const getSquadPreservationMetrics = (
   return {
     pivot: pivotNumber,
     requiredInforms: requiredInformsNumber,
+    requiredSpecials: requiredSpecialsNumber,
     informCount,
+    specialCount,
     excessInforms,
+    excessSpecials,
     highScore,
     highCount,
     maxRating,
@@ -1800,6 +1816,8 @@ const isPreservationMetricsBetter = (candidate, current, options = {}) => {
   ) {
     return candidate.excessInforms < current.excessInforms;
   }
+  if (candidate.excessSpecials !== current.excessSpecials)
+    return candidate.excessSpecials < current.excessSpecials;
   if (candidate.highScore !== current.highScore)
     return candidate.highScore < current.highScore;
   if (candidate.highCount !== current.highCount)
@@ -2707,6 +2725,22 @@ const improveChemistrySmart = (
 
   const maxIterations = Math.max(10, toNumber(options?.maxIterations) ?? 60);
   const candidateLimit = Math.max(40, toNumber(options?.maxCandidates) ?? 160);
+  const chemistryEscapeDepth = Math.max(
+    1,
+    toNumber(options?.chemistryEscapeDepth) ?? 3,
+  );
+  const chemistryEscapeBeamWidth = Math.max(
+    8,
+    toNumber(options?.chemistryEscapeBeamWidth) ?? 14,
+  );
+  const chemistryEscapeCandidateLimit = Math.max(
+    20,
+    toNumber(options?.chemistryEscapeCandidateLimit) ?? 70,
+  );
+  const chemistryEscapePenaltySlack = Math.max(
+    0,
+    toNumber(options?.chemistryEscapePenaltySlack) ?? 30,
+  );
 
   const requiredInforms = Math.max(0, toNumber(options?.requiredInforms) ?? 0);
   const avoidInforms = options?.avoidInforms !== false && requiredInforms <= 0;
@@ -2725,6 +2759,18 @@ const improveChemistrySmart = (
       .filter(Boolean)
       .map((value) => String(value)),
   );
+  const slotPositions = slotList
+    .slice(0, n)
+    .map((slot) => slot?.positionName ?? null)
+    .map((value) => (value == null ? null : String(value)));
+  const getPlayerPosNames = (player) => {
+    const alt = Array.isArray(player?.alternativePositionNames)
+      ? player.alternativePositionNames
+      : [];
+    if (alt.length) return alt.map((name) => String(name));
+    const preferred = player?.preferredPositionName ?? null;
+    return preferred == null ? [] : [String(preferred)];
+  };
 
   const computePenalty = (chem) => {
     if (!chem) return Infinity;
@@ -2765,8 +2811,38 @@ const improveChemistrySmart = (
       preferLowerExcessInforms,
     });
   };
+  const compareStateKeys = (a, b) => {
+    if (!a && !b) return 0;
+    if (!a) return 1;
+    if (!b) return -1;
+    if (a.penalty !== b.penalty) return a.penalty - b.penalty;
+    if (a.totalChem !== b.totalChem) return b.totalChem - a.totalChem;
+    if (a.onPos !== b.onPos) return b.onPos - a.onPos;
+    if (a.potentialSum !== b.potentialSum) return b.potentialSum - a.potentialSum;
+    if (
+      isPreservationMetricsBetter(a.preserve, b.preserve, {
+        preferLowerExcessInforms,
+      })
+    ) {
+      return -1;
+    }
+    if (
+      isPreservationMetricsBetter(b.preserve, a.preserve, {
+        preferLowerExcessInforms,
+      })
+    ) {
+      return 1;
+    }
+    return 0;
+  };
+  const buildSquadStateKey = (list) =>
+    (list || [])
+      .slice(0, n)
+      .map((player) => String(player?.id ?? 0))
+      .sort()
+      .join(",");
 
-  const buildCandidatePool = (workingSquad) => {
+  const buildCandidatePool = (workingSquad, currentChem) => {
     const usedIds = new Set(
       (workingSquad || [])
         .map((player) => player?.id)
@@ -2783,14 +2859,9 @@ const improveChemistrySmart = (
       .filter((player) => !usedIds.has(player.id))
       .filter((player) => (avoidInforms ? !isInformPlayer(player) : true));
 
-    const scoreCandidate = (player) => {
-      const posNames = Array.isArray(player?.alternativePositionNames)
-        ? player.alternativePositionNames
-        : player?.preferredPositionName
-          ? [player.preferredPositionName]
-          : [];
+    const scoreCandidate = (player, posNames) => {
       const posMatches = posNames.reduce(
-        (sum, name) => (slotPositionSet.has(String(name)) ? sum + 1 : sum),
+        (sum, name) => (slotPositionSet.has(name) ? sum + 1 : sum),
         0,
       );
       const club = counts.club.get(player.teamId) || 0;
@@ -2801,8 +2872,15 @@ const improveChemistrySmart = (
     };
 
     const scored = available.map((player) => {
-      const score = scoreCandidate(player);
-      return { player, posMatches: score.posMatches, synergy: score.synergy };
+      const posNames = getPlayerPosNames(player);
+      const score = scoreCandidate(player, posNames);
+      return {
+        player,
+        posNames,
+        posSet: new Set(posNames),
+        posMatches: score.posMatches,
+        synergy: score.synergy,
+      };
     });
 
     scored.sort((a, b) => {
@@ -2811,7 +2889,54 @@ const improveChemistrySmart = (
       return a.player.rating - b.player.rating;
     });
 
-    return scored.slice(0, candidateLimit).map((entry) => entry.player);
+    const positionCoveragePerSlot = Math.max(
+      4,
+      toNumber(options?.positionCoveragePerSlot) ?? 10,
+    );
+    const candidateHardCap = Math.max(
+      candidateLimit,
+      Math.min(320, slotPositionSet.size * positionCoveragePerSlot),
+    );
+    const neededPositions = new Set(slotPositionSet);
+    if (
+      Array.isArray(currentChem?.onPosition) &&
+      currentChem.onPosition.length >= n
+    ) {
+      for (let slotIndex = 0; slotIndex < n; slotIndex += 1) {
+        if (currentChem.onPosition[slotIndex]) continue;
+        const position = slotPositions[slotIndex];
+        if (position) neededPositions.add(position);
+      }
+    }
+
+    const selectedById = new Map();
+    const pushCandidate = (entry) => {
+      const id = entry?.player?.id;
+      if (id == null || selectedById.has(id)) return false;
+      selectedById.set(id, entry.player);
+      return true;
+    };
+
+    // Ensure every required position gets representation in the candidate set,
+    // so chemistry recovery can replace off-position players (e.g., missing GK).
+    for (const position of neededPositions) {
+      let addedForPosition = 0;
+      for (const entry of scored) {
+        if (selectedById.size >= candidateHardCap) break;
+        if (addedForPosition >= positionCoveragePerSlot) break;
+        if (!entry.posSet.has(position)) continue;
+        if (pushCandidate(entry)) {
+          addedForPosition += 1;
+        }
+      }
+    }
+
+    for (const entry of scored) {
+      if (selectedById.size >= candidateHardCap) break;
+      pushCandidate(entry);
+    }
+
+    return Array.from(selectedById.values());
   };
 
   let bestChem = computeChemistryEval(squad, slotList, n);
@@ -2831,7 +2956,7 @@ const improveChemistrySmart = (
       return true;
     }
 
-    const candidates = buildCandidatePool(squad);
+    const candidates = buildCandidatePool(squad, bestChem);
     if (!candidates.length) break;
 
     const currentPreserve = getSquadPreservationMetrics(
@@ -3036,6 +3161,144 @@ const improveChemistrySmart = (
           minChem: bestChem?.minChem ?? null,
           penalty: bestPenalty,
         });
+        continue;
+      }
+
+      const tryChemistryEscape = () => {
+        const baseCandidates = buildCandidatePool(squad, bestChem)
+          .slice(0, chemistryEscapeCandidateLimit)
+          .filter(Boolean);
+        if (!baseCandidates.length) return null;
+
+        const makeNode = (nextSquad, depth) => {
+          const chem = computeChemistryEval(nextSquad, slotList, n);
+          const penalty = computePenalty(chem);
+          const preserve = getSquadPreservationMetrics(
+            nextSquad.slice(0, n),
+            ratingTarget,
+            pivot,
+            requiredInforms,
+          );
+          const key = buildKey(chem, penalty, preserve);
+          return {
+            squad: nextSquad,
+            chem,
+            penalty,
+            preserve,
+            key,
+            depth,
+          };
+        };
+
+        const startNode = {
+          squad: squad.slice(),
+          chem: bestChem,
+          penalty: bestPenalty,
+          preserve: currentPreserve,
+          key: currentKey,
+          depth: 0,
+        };
+        let beam = [startNode];
+        const visited = new Set([buildSquadStateKey(startNode.squad)]);
+        let bestFallback = null;
+
+        for (let depth = 0; depth < chemistryEscapeDepth; depth += 1) {
+          const nextBeam = [];
+          for (const node of beam) {
+            const nodeSquad = node.squad;
+            const usedIds = new Set(
+              nodeSquad
+                .slice(0, n)
+                .map((player) => player?.id)
+                .filter((id) => id != null),
+            );
+            const usedDefs = new Set(
+              nodeSquad
+                .slice(0, n)
+                .map((player) => getDefinitionKey(player))
+                .filter((value) => value != null)
+                .map((value) => String(value)),
+            );
+
+            for (let outIndex = 0; outIndex < n; outIndex += 1) {
+              const outPlayer = nodeSquad[outIndex];
+              if (!outPlayer) continue;
+              if (hardLocked.has(outPlayer.id)) continue;
+
+              const outDef = getDefinitionKey(outPlayer);
+
+              for (const inPlayer of baseCandidates) {
+                if (!inPlayer) continue;
+                if (inPlayer.id === outPlayer.id) continue;
+                if (usedIds.has(inPlayer.id) && inPlayer.id !== outPlayer.id)
+                  continue;
+
+                const inDef = getDefinitionKey(inPlayer);
+                if (inDef != null) {
+                  const key = String(inDef);
+                  if (key !== String(outDef) && usedDefs.has(key)) continue;
+                }
+
+                const nextSquad = nodeSquad.slice();
+                nextSquad[outIndex] = inPlayer;
+                const stateKey = buildSquadStateKey(nextSquad);
+                if (visited.has(stateKey)) continue;
+                visited.add(stateKey);
+
+                if (!isSquadValid(rules, nextSquad, n)) continue;
+                const nextNode = makeNode(nextSquad, depth + 1);
+                if (
+                  nextNode.penalty >
+                  bestPenalty + chemistryEscapePenaltySlack
+                ) {
+                  continue;
+                }
+
+                if (
+                  nextNode.penalty <= 0 &&
+                  isChemistrySatisfied(nextNode.chem, targets)
+                ) {
+                  return {
+                    solved: true,
+                    node: nextNode,
+                  };
+                }
+
+                if (!bestFallback || isKeyBetter(nextNode.key, bestFallback.key))
+                  bestFallback = nextNode;
+                nextBeam.push(nextNode);
+              }
+            }
+          }
+
+          if (!nextBeam.length) break;
+          nextBeam.sort((a, b) => compareStateKeys(a.key, b.key));
+          beam = nextBeam.slice(0, chemistryEscapeBeamWidth);
+        }
+
+        if (bestFallback && isKeyBetter(bestFallback.key, currentKey)) {
+          return {
+            solved: false,
+            node: bestFallback,
+          };
+        }
+        return null;
+      };
+      const escaped = tryChemistryEscape();
+      if (escaped?.node) {
+        squad.splice(0, squad.length, ...escaped.node.squad);
+        bestChem = escaped.node.chem;
+        bestPenalty = escaped.node.penalty;
+        debugPush?.({
+          stage: "chemistry",
+          action: escaped.solved ? "escape_solved" : "escape",
+          iteration,
+          depth: escaped.node.depth,
+          totalChem: bestChem?.totalChem ?? null,
+          minChem: bestChem?.minChem ?? null,
+          penalty: bestPenalty,
+        });
+        if (escaped.solved) return true;
         continue;
       }
 
@@ -3371,6 +3634,80 @@ export const solveSquad = (context) => {
   let pool = normalizedPlayers.slice();
   let squad = [];
   const lockedIds = new Set();
+  const preservedSeedIds = new Set();
+
+  // Build player-by-id lookup from normalized pool for slot resolution and special fallback.
+  const playerById = new Map(
+    normalizedPlayers
+      .filter((p) => p?.id != null)
+      .map((p) => [String(p.id), p]),
+  );
+
+  // Pre-seed squad from occupied field slots so solve/apply stay consistent.
+  // The page layer preserves valid slot items during apply (single-solve flow),
+  // so treating valid occupied slots as pre-seeded avoids overfilling (11 + preserved).
+  const slotDiag = [];
+  for (const slot of context?.squadSlots || []) {
+    const item = slot?.item ?? null;
+    const hasItem = item && typeof item === "object";
+    const concept = hasItem
+      ? typeof item.isConcept === "function"
+        ? item.isConcept()
+        : Boolean(item?.concept)
+      : false;
+    const id = hasItem ? (item?.id ?? null) : null;
+    const idKey = id != null ? String(id) : null;
+    const isLocked = slot?.isLocked ?? null;
+    const isEditable = slot?.isEditable ?? null;
+    const isBrick = slot?.isBrick ?? null;
+    const isValid = slot?.isValid ?? null;
+    slotDiag.push({
+      slotIndex: slot?.slotIndex ?? null,
+      isLocked,
+      isEditable,
+      isBrick,
+      isValid,
+      hasItem: Boolean(hasItem && !concept && idKey),
+      itemId: idKey,
+      concept,
+    });
+    // Keep any occupied valid slot, plus explicit lock/brick/non-editable flags.
+    const keep =
+      isValid === true ||
+      isBrick === true ||
+      isLocked === true ||
+      isEditable === false;
+    if (!keep) continue;
+    if (!hasItem || concept) continue;
+    if (!idKey || idKey === "0") continue;
+    const player = playerById.get(idKey);
+    if (!player) continue;
+    squad.push(player);
+    lockedIds.add(player.id);
+    preservedSeedIds.add(player.id);
+  }
+  debugPush?.({ stage: "preseed", slotDiag, preseeded: squad.length });
+
+  // Resolve slot items to normalized players so we can count how many slot
+  // items already satisfy each prefill predicate (e.g. TOTW already in a slot).
+  // The page layer preserves valid slot items during apply, so the solver
+  // should reduce its own prefill quotas to avoid wasteful duplicates.
+  const slotPlayers = [];
+  for (const slot of context?.squadSlots || []) {
+    const item = slot?.item ?? null;
+    if (!item || typeof item !== "object") continue;
+    const concept =
+      typeof item.isConcept === "function"
+        ? item.isConcept()
+        : Boolean(item?.concept);
+    if (concept) continue;
+    const id = item?.id ?? null;
+    if (id == null) continue;
+    const idKey = String(id);
+    if (!idKey || idKey === "0") continue;
+    const player = playerById.get(idKey);
+    if (player) slotPlayers.push(player);
+  }
 
   const rulesByType = new Map();
   for (const rule of rules) {
@@ -3624,11 +3961,20 @@ export const solveSquad = (context) => {
       // "max" rules are enforced via predicate caps in prefill/fill.
       if (rule.op === "max") continue;
 
+      // Reduce required count by how many slot items already satisfy this
+      // predicate. The page preserves valid slot items during apply, so the
+      // solver should not add duplicates the user has already placed.
+      const slotSatisfied = slotPlayers.reduce(
+        (count, player) => (predicate(player) ? count + 1 : count),
+        0,
+      );
+      const effectiveRequired = Math.max(0, required - slotSatisfied);
+
       const filled = prefillPlayers(
         squad,
         pool,
         predicate,
-        required,
+        effectiveRequired,
         lockedIds,
         {
           uniqueMaxByAttr,
@@ -3636,13 +3982,21 @@ export const solveSquad = (context) => {
           predicateCaps,
         },
       );
-      appliedFilters.push({ type, method: "prefill", required, filled });
+      appliedFilters.push({
+        type,
+        method: "prefill",
+        required: effectiveRequired,
+        filled,
+        slotSatisfied,
+      });
       debugPush?.({
         stage: "filter",
         action: "apply",
         method: "prefill",
         type,
-        required,
+        required: effectiveRequired,
+        originalRequired: required,
+        slotSatisfied,
         filled,
         squadSize: squad.length,
       });
@@ -3696,6 +4050,15 @@ export const solveSquad = (context) => {
     }
   }
 
+  // Soft-discourage specials: at equal rating, non-specials come first in pool ordering.
+  // This passively makes fill/swap prefer non-specials without blocking specials.
+  pool.sort((a, b) => {
+    const ra = toNumber(a?.rating) ?? 0;
+    const rb = toNumber(b?.rating) ?? 0;
+    if (ra !== rb) return ra - rb;
+    return (a?.isSpecial ? 1 : 0) - (b?.isSpecial ? 1 : 0);
+  });
+
   squad = fillSquad(squad, pool, squadSize, lockedIds, {
     uniqueMaxByAttr,
     sameMaxByAttr,
@@ -3724,9 +4087,22 @@ export const solveSquad = (context) => {
   }
 
   // Prefill uses `lockedIds` to avoid selecting the same item twice.
-  // Once we have a full squad, clear soft locks so later passes (unique-count, rating, chemistry)
-  // can swap freely as long as constraints stay satisfied.
+  // Once we have a full squad, clear transient fill locks. Optionally keep
+  // preseeded occupied slot players locked for the full solve lifecycle.
   lockedIds.clear();
+  const preserveOccupiedSlots = toBooleanSetting(
+    context?.filters?.preserveOccupiedSlots,
+    false,
+  );
+  if (preserveOccupiedSlots && preservedSeedIds.size) {
+    for (const id of preservedSeedIds) lockedIds.add(id);
+    debugPush?.({
+      stage: "preseed",
+      action: "lock_reapply",
+      preserveOccupiedSlots,
+      lockedCount: lockedIds.size,
+    });
+  }
 
   // Enforce unique-count constraints (e.g. "Clubs in Squad: Max. 5") before rating improvement.
   // Rating improvement requires intermediate squads to be valid, so we must satisfy these early.
