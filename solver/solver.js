@@ -334,6 +334,26 @@ const normalizePlayers = (players) => {
   return normalized;
 };
 
+const collectLockedPlayerIdsFromSlots = (slots) => {
+  const list = Array.isArray(slots) ? slots : [];
+  const lockedIds = new Set();
+  for (const slot of list) {
+    const item = slot?.item ?? null;
+    if (!item || typeof item !== "object") continue;
+    const concept =
+      typeof item.isConcept === "function"
+        ? item.isConcept()
+        : Boolean(item?.concept);
+    if (concept) continue;
+    const id = item?.id ?? null;
+    if (id == null) continue;
+    const normalizedId = String(id);
+    if (!normalizedId || normalizedId === "0") continue;
+    lockedIds.add(normalizedId);
+  }
+  return lockedIds;
+};
+
 const roundTo = (value, decimals) => {
   if (!Number.isFinite(value)) return 0;
   const factor = Math.pow(10, decimals);
@@ -397,9 +417,11 @@ export const buildSolverContext = ({
     onlyUntradeables: toBooleanSetting(filters?.onlyUntradeables, false),
     onlyDuplicates: toBooleanSetting(filters?.onlyDuplicates, false),
     excludeSpecial: toBooleanSetting(filters?.excludeSpecial, false),
+    useEvolutionPlayers: toBooleanSetting(filters?.useEvolutionPlayers, false),
   };
 
   let normalizedPlayers = normalizePlayers(players);
+  const lockedSlotPlayerIds = collectLockedPlayerIdsFromSlots(squadSlots);
   const excludedIds = new Set(
     (normalizedFilters?.excludedPlayerIds ?? [])
       .map((value) => (value == null ? null : String(value)))
@@ -409,6 +431,13 @@ export const buildSolverContext = ({
     normalizedPlayers = normalizedPlayers.filter((player) => {
       if (player?.id == null) return true;
       return !excludedIds.has(String(player.id));
+    });
+  }
+  if (!normalizedFilters.useEvolutionPlayers) {
+    normalizedPlayers = normalizedPlayers.filter((player) => {
+      if (!player?.isEvolution) return true;
+      if (player?.id == null) return false;
+      return lockedSlotPlayerIds.has(String(player.id));
     });
   }
   if (normalizedFilters.onlyStorage) {

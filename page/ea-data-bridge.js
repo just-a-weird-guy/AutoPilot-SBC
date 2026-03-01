@@ -14393,6 +14393,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     SOLVER_ONLY_STORAGE: "solver.onlyStorage",
     SOLVER_EXCLUDE_TRADABLE: "solver.excludeTradable",
     SOLVER_EXCLUDE_SPECIAL: "solver.excludeSpecial",
+    SOLVER_USE_EVOLUTION_PLAYERS: "solver.useEvolutionPlayers",
     SOLVER_EXCLUDED_PLAYER_IDS: "solver.excludedPlayerIds",
     SOLVER_EXCLUDED_LEAGUE_IDS: "solver.excludedLeagueIds",
     SOLVER_EXCLUDED_NATION_IDS: "solver.excludedNationIds",
@@ -14407,6 +14408,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       onlyStorage: false,
       excludeTradable: true,
       excludeSpecial: false,
+      useEvolutionPlayers: false,
       excludedPlayerIds: Object.freeze([]),
       excludedLeagueIds: Object.freeze([]),
       excludedNationIds: Object.freeze([]),
@@ -14446,6 +14448,15 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       idSuffix: "exclude-special",
       label: "Exclude Special",
       help: "Prefer non-special cards for cheaper submissions.",
+      scopes: Object.freeze(["challenge", "global", "multi", "set"]),
+      legacyKeys: Object.freeze([]),
+    }),
+    Object.freeze({
+      key: "useEvolutionPlayers",
+      path: SETTINGS_PATHS.SOLVER_USE_EVOLUTION_PLAYERS,
+      idSuffix: "use-evolution-players",
+      label: "Use Evolution Players",
+      help: "Allow evolution cards in generated solutions. When off, evolution cards are blocked (including unassigned duplicates) except already locked required players.",
       scopes: Object.freeze(["challenge", "global", "multi", "set"]),
       legacyKeys: Object.freeze([]),
     }),
@@ -15368,6 +15379,16 @@ input.ea-data-range__input:disabled::-moz-range-progress {
   const clearGlobalExcludedNationIds = async () =>
     setGlobalExcludedNationIds([]);
 
+  const isEvolutionPlayer = (player) => {
+    if (!player || typeof player !== "object") return false;
+    const resolved =
+      typeof player.isEvolution === "function"
+        ? player.isEvolution()
+        : player.isEvolution;
+    if (resolved != null) return Boolean(resolved);
+    return Boolean(player.upgrades);
+  };
+
   const filterPlayersBySolverPoolSettings = (
     players,
     settings,
@@ -15385,6 +15406,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const onlyStorage = Boolean(poolSettings?.onlyStorage);
     const excludeTradable = Boolean(poolSettings?.excludeTradable);
     const excludeSpecial = Boolean(poolSettings?.excludeSpecial);
+    const useEvolutionPlayers = Boolean(poolSettings?.useEvolutionPlayers);
     const excludedPlayerIds = normalizePlayerIdList(
       normalized?.excludedPlayerIds,
       getSettingDefault(SETTINGS_PATHS.SOLVER_EXCLUDED_PLAYER_IDS),
@@ -15427,6 +15449,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         return false;
       }
       if (id != null && required.has(String(id))) return true;
+      // Intentional precedence: evo hard-block runs before unassigned bypass.
+      if (!useEvolutionPlayers && isEvolutionPlayer(player)) return false;
       if (useUnassigned && player?.isDuplicate) return true;
       if (onlyStorage && !player?.isStorage) return false;
       if (excludeTradable && Boolean(player?.isTradeable)) return false;
@@ -17743,7 +17767,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       typeof item.isTradeable === "function"
         ? !item.isTradeable()
         : !item.isTradeable;
-    const isEvolution = Boolean(item.upgrades);
+    const isEvolution =
+      typeof item.isEvolution === "function"
+        ? Boolean(item.isEvolution())
+        : Boolean(item.isEvolution ?? item.upgrades);
     const isAcademy = Boolean(item.isEnrolledInAcademy?.());
     const isDuplicate =
       Boolean(duplicateDefIds?.has(item.definitionId)) &&
@@ -17772,6 +17799,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       rarityId,
       rarityName: getRarityName(rarityId),
       isSpecial,
+      isEvolution,
       preferredPositionId,
       preferredPositionName,
       alternativePositionIds,
