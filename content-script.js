@@ -1,14 +1,118 @@
-const bridgeScript = document.createElement("script");
-bridgeScript.src = chrome.runtime.getURL("page/ea-data-bridge.js");
-bridgeScript.type = "module";
+const injectPageScript = (path, { type = "module" } = {}) =>
+  new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    const src = chrome.runtime.getURL(path);
+    script.src = src;
+    if (type) script.type = type;
+    script.onload = function () {
+      script.parentNode?.removeChild(script);
+      resolve({ path, type: type || "classic", src });
+    };
+    script.onerror = function (errorEvent) {
+      script.parentNode?.removeChild(script);
+      const error = new Error(
+        `[EA Data] Failed to inject script: ${path} (${type || "classic"})`,
+      );
+      error.path = path;
+      error.injectType = type || "classic";
+      error.src = src;
+      error.eventType = errorEvent?.type ?? null;
+      reject(error);
+    };
+    (document.head || document.documentElement).appendChild(script);
+  });
 
-(document.head || document.documentElement).appendChild(bridgeScript);
+const BRIDGE_INJECT_REQUEST = "EA_PAGE_BRIDGE_INJECT";
 
-bridgeScript.onload = function () {
-  bridgeScript.parentNode.removeChild(bridgeScript);
-};
+const requestBackgroundBridgeInject = (path) =>
+  new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage(
+        {
+          type: BRIDGE_INJECT_REQUEST,
+          payload: { path },
+        },
+        (response) => {
+          const runtimeError = chrome.runtime?.lastError;
+          if (runtimeError) {
+            reject(
+              new Error(
+                runtimeError.message || "Background bridge injection failed",
+              ),
+            );
+            return;
+          }
+          if (response?.ok) {
+            resolve(response?.data ?? { injected: true, path });
+            return;
+          }
+          reject(
+            new Error(
+              response?.error?.message || "Background bridge injection failed",
+            ),
+          );
+        },
+      );
+    } catch (error) {
+      reject(error);
+    }
+  });
 
-const CONTENT_SCRIPT_VERSION = "2026-02-22b";
+void (async () => {
+  if (window !== window.top) return;
+  const bridgePath = "page/ea-data-bridge.js";
+  try {
+    await injectPageScript(bridgePath, { type: "module" });
+  } catch (error) {
+    console.warn("[EA Data] Module script injection failed; retrying classic", {
+      path: error?.path ?? bridgePath,
+      type: error?.injectType ?? "module",
+      src: error?.src ?? null,
+      message: error?.message ?? String(error),
+    });
+    try {
+      await injectPageScript(bridgePath, { type: null });
+      console.warn("[EA Data] Classic script injection fallback succeeded", {
+        path: bridgePath,
+      });
+    } catch (fallbackError) {
+      try {
+        await requestBackgroundBridgeInject(bridgePath);
+        console.warn(
+          "[EA Data] Background executeScript injection fallback succeeded",
+          {
+            path: bridgePath,
+          },
+        );
+      } catch (backgroundError) {
+        console.error("[EA Data] Script injection failed", {
+          moduleError: {
+            path: error?.path ?? bridgePath,
+            type: error?.injectType ?? "module",
+            src: error?.src ?? null,
+            message: error?.message ?? String(error),
+          },
+          fallbackError: {
+            path: fallbackError?.path ?? bridgePath,
+            type: fallbackError?.injectType ?? "classic",
+            src: fallbackError?.src ?? null,
+            message: fallbackError?.message ?? String(fallbackError),
+          },
+          backgroundError: {
+            path: bridgePath,
+            message: backgroundError?.message ?? String(backgroundError),
+          },
+          href: location.href,
+          frame: window === window.top ? "top" : "child",
+          ua: navigator.userAgent,
+          at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+})();
+
+const CONTENT_SCRIPT_VERSION = "2026-03-03b";
 console.log("[EA Data] Content script loaded", {
   version: CONTENT_SCRIPT_VERSION,
 });

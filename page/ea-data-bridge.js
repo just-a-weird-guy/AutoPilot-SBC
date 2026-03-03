@@ -154,15 +154,139 @@
   const searchStorage = (criteria) =>
     observableToPromise(services.Item.searchStorageItems(criteria));
 
-  const fetchAllPages = async (searchFn, criteria, delaySeconds = 0) => {
+  const DEFAULT_SEARCH_PAGE_DELAY_SECONDS = 0.25;
+  const APPLY_LOOKUP_FAST_PAGE_DELAY_SECONDS = 0.12;
+  const APPLY_LOOKUP_ADAPTIVE_PROFILE_KEY = "apply-lookup";
+  const APPLY_LOOKUP_ADAPTIVE_COOLDOWN_MS = 45 * 1000;
+  const APPLY_LOOKUP_WARM_CACHE_TTL_MS = 180 * 1000;
+  const adaptivePageDelayStateByProfile = new Map();
+  let recentApplyLookupCache = null;
+  let playersFetchCacheRevision = 0;
+  const APPLY_MODE_DEFAULT = "default";
+  const APPLY_MODE_EXPERIMENTAL_HYBRID = "experimental-hybrid";
+  let solverApplyMode = APPLY_MODE_EXPERIMENTAL_HYBRID;
+
+  const normalizeApplyMode = (value) => {
+    const normalized = String(value ?? "")
+      .trim()
+      .toLowerCase();
+    if (!normalized || normalized === APPLY_MODE_DEFAULT) {
+      return APPLY_MODE_DEFAULT;
+    }
+    if (
+      normalized === APPLY_MODE_EXPERIMENTAL_HYBRID ||
+      normalized === "experimental" ||
+      normalized === "experiment" ||
+      normalized === "hybrid" ||
+      normalized === "new"
+    ) {
+      return APPLY_MODE_EXPERIMENTAL_HYBRID;
+    }
+    return null;
+  };
+
+  const toNonNegativeNumber = (value, fallback = 0) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(0, n);
+  };
+
+  const getAdaptivePageDelayState = (profileKey) => {
+    if (!profileKey) return null;
+    const key = String(profileKey);
+    if (!adaptivePageDelayStateByProfile.has(key)) {
+      adaptivePageDelayStateByProfile.set(key, {
+        safeUntil: 0,
+        retryableHits: 0,
+        lastRetryableAt: 0,
+      });
+    }
+    return adaptivePageDelayStateByProfile.get(key);
+  };
+
+  const normalizePageDelayConfig = (delayConfig) => {
+    if (
+      delayConfig == null ||
+      typeof delayConfig === "number" ||
+      typeof delayConfig === "string"
+    ) {
+      return {
+        baseDelaySeconds: toNonNegativeNumber(delayConfig, 0),
+        adaptive: false,
+        safeDelaySeconds: 0,
+        cooldownMs: 0,
+        profileKey: null,
+        onTelemetry: null,
+      };
+    }
+    if (typeof delayConfig !== "object") {
+      return {
+        baseDelaySeconds: 0,
+        adaptive: false,
+        safeDelaySeconds: 0,
+        cooldownMs: 0,
+        profileKey: null,
+        onTelemetry: null,
+      };
+    }
+    return {
+      baseDelaySeconds: toNonNegativeNumber(
+        delayConfig.baseDelaySeconds,
+        DEFAULT_SEARCH_PAGE_DELAY_SECONDS,
+      ),
+      adaptive: delayConfig.adaptive === true,
+      safeDelaySeconds: toNonNegativeNumber(
+        delayConfig.safeDelaySeconds,
+        DEFAULT_SEARCH_PAGE_DELAY_SECONDS,
+      ),
+      cooldownMs: toNonNegativeNumber(
+        delayConfig.cooldownMs,
+        APPLY_LOOKUP_ADAPTIVE_COOLDOWN_MS,
+      ),
+      profileKey:
+        delayConfig.profileKey == null ? null : String(delayConfig.profileKey),
+      onTelemetry:
+        typeof delayConfig.onTelemetry === "function"
+          ? delayConfig.onTelemetry
+          : null,
+    };
+  };
+
+  const fetchAllPages = async (searchFn, criteria, delayConfig = 0) => {
     const items = [];
     let offset = criteria.offset ?? 0;
     let endOfList = false;
+    const cfg = normalizePageDelayConfig(delayConfig);
+    const adaptiveState = cfg.adaptive
+      ? getAdaptivePageDelayState(cfg.profileKey)
+      : null;
+    let effectiveDelaySeconds = cfg.baseDelaySeconds;
+    const now = Date.now();
+    if (
+      adaptiveState &&
+      adaptiveState.safeUntil > now &&
+      cfg.safeDelaySeconds > effectiveDelaySeconds
+    ) {
+      effectiveDelaySeconds = cfg.safeDelaySeconds;
+    }
+    const telemetry = {
+      pages: 0,
+      retryableAttempts: 0,
+      retryablePages: 0,
+      adaptiveSafeModeStart: Boolean(
+        adaptiveState && adaptiveState.safeUntil > now,
+      ),
+      adaptiveEscalated: false,
+      delayAppliedMs: 0,
+      effectiveDelaySecondsStart: effectiveDelaySeconds,
+      effectiveDelaySecondsEnd: effectiveDelaySeconds,
+    };
 
     while (!endOfList) {
       criteria.offset = offset;
       let result = null;
       const maxAttempts = isSbcAutomationActive() ? 4 : 2;
+      let retryableSeenThisPage = false;
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         result = await searchFn(criteria);
         const ok = result?.success === true || result?.success == null;
@@ -173,6 +297,10 @@
           /rate|limit|thrott|timeout|busy|tempor/i.test(
             String(result?.error ?? ""),
           );
+        if (retryable) {
+          retryableSeenThisPage = true;
+          telemetry.retryableAttempts += 1;
+        }
         if (ok && result?.data) break;
         if (!retryable || attempt >= maxAttempts) break;
         const waitMs = jitterMs(
@@ -184,6 +312,7 @@
 
       const data = result?.data;
       const pageItems = data?.items ?? [];
+      telemetry.pages += 1;
       items.push(...pageItems);
       endOfList = data
         ? "endOfList" in data
@@ -191,15 +320,107 @@
           : data.retrievedAll
         : true;
       offset += criteria.count ?? pageItems.length ?? 0;
-      if (delaySeconds) await delay(delaySeconds);
       if (!pageItems.length) break;
+      if (endOfList) break;
+      if (retryableSeenThisPage) {
+        telemetry.retryablePages += 1;
+        if (adaptiveState && cfg.cooldownMs > 0) {
+          const until = Date.now() + cfg.cooldownMs;
+          if (until > adaptiveState.safeUntil) adaptiveState.safeUntil = until;
+          adaptiveState.retryableHits += 1;
+          adaptiveState.lastRetryableAt = Date.now();
+        }
+        if (cfg.safeDelaySeconds > effectiveDelaySeconds) {
+          effectiveDelaySeconds = cfg.safeDelaySeconds;
+          telemetry.adaptiveEscalated = true;
+        }
+      }
+      if (effectiveDelaySeconds > 0) {
+        telemetry.delayAppliedMs += Math.round(effectiveDelaySeconds * 1000);
+        await delay(effectiveDelaySeconds);
+      }
     }
+    telemetry.effectiveDelaySecondsEnd = effectiveDelaySeconds;
+    try {
+      cfg.onTelemetry?.(telemetry);
+    } catch {}
 
     return items;
   };
 
+  const readWarmApplyLookup = (lookupKey, ids = []) => {
+    const cache = recentApplyLookupCache;
+    if (!cache || typeof cache !== "object") return null;
+    if (
+      Number(cache.revision ?? -1) !== Number(playersFetchCacheRevision ?? 0)
+    ) {
+      return null;
+    }
+    const key = String(lookupKey ?? "id");
+    if (cache.lookupKey !== key) return null;
+    const at = Number(cache.at ?? 0);
+    if (!Number.isFinite(at) || Date.now() - at > APPLY_LOOKUP_WARM_CACHE_TTL_MS) {
+      return null;
+    }
+    const lookup = cache.lookup;
+    if (!(lookup instanceof Map)) return null;
+    for (const id of ids || []) {
+      if (id == null) continue;
+      if (!lookup.has(id) && !lookup.has(String(id))) {
+        return null;
+      }
+    }
+    return lookup;
+  };
+
+  const writeWarmApplyLookup = (lookupKey, lookup) => {
+    if (!(lookup instanceof Map)) return;
+    recentApplyLookupCache = {
+      at: Date.now(),
+      revision: Number(playersFetchCacheRevision ?? 0),
+      lookupKey: String(lookupKey ?? "id"),
+      lookup,
+    };
+  };
+
+  const createApplyLookupOptions = ({
+    delaySeconds = APPLY_LOOKUP_FAST_PAGE_DELAY_SECONDS,
+    adaptive = true,
+    safeDelaySeconds = DEFAULT_SEARCH_PAGE_DELAY_SECONDS,
+    cooldownMs = APPLY_LOOKUP_ADAPTIVE_COOLDOWN_MS,
+    profileKey = APPLY_LOOKUP_ADAPTIVE_PROFILE_KEY,
+    telemetry = null,
+  } = {}) => {
+    const options = {
+      ignoreLoaned: true,
+      excludeActiveSquad: true,
+      raw: true,
+      skipStats: true,
+      lookupDelaySeconds: delaySeconds,
+      lookupDelayAdaptive: adaptive,
+      lookupDelaySafeSeconds: safeDelaySeconds,
+      lookupDelayCooldownMs: cooldownMs,
+      lookupDelayProfileKey: profileKey,
+    };
+    if (telemetry && typeof telemetry === "object") {
+      options.lookupTelemetry = telemetry;
+    }
+    return options;
+  };
+
+  const createTargetedApplyLookupOptions = () =>
+    createApplyLookupOptions({
+      delaySeconds: 0,
+      adaptive: false,
+      safeDelaySeconds: 0,
+    });
+
   const updateSearchCriteria = async (criteria, options) => {
-    if (options.playerId) criteria.defId = [options.playerId];
+    if (Array.isArray(options?.playerIds) && options.playerIds.length) {
+      criteria.defId = options.playerIds;
+    } else if (options.playerId) {
+      criteria.defId = [options.playerId];
+    }
     if (options.onlyUntradables || options.onlyTradables) {
       criteria.untradeables = options.onlyUntradables ? "true" : "false";
     }
@@ -635,9 +856,16 @@
       onlyUntradables,
       onlyTradables,
       playerId,
+      playerIds,
       dedupe = true,
       skipStats = true,
       duplicateDefIds,
+      lookupDelaySeconds = DEFAULT_SEARCH_PAGE_DELAY_SECONDS,
+      lookupDelayAdaptive = false,
+      lookupDelaySafeSeconds = DEFAULT_SEARCH_PAGE_DELAY_SECONDS,
+      lookupDelayCooldownMs = APPLY_LOOKUP_ADAPTIVE_COOLDOWN_MS,
+      lookupDelayProfileKey = null,
+      lookupTelemetry = null,
     } = opts;
 
     if (!skipStats && services.Club?.clubDao?.resetStatsCache) {
@@ -652,10 +880,21 @@
       onlyUntradables,
       onlyTradables,
       playerId,
+      playerIds,
     });
 
     // Small delay between pages helps avoid FUT rate limits on large clubs.
-    let players = await fetchAllPages(searchClub, searchCriteria, 0.25);
+    let players = await fetchAllPages(searchClub, searchCriteria, {
+      baseDelaySeconds: lookupDelaySeconds,
+      adaptive: lookupDelayAdaptive,
+      safeDelaySeconds: lookupDelaySafeSeconds,
+      cooldownMs: lookupDelayCooldownMs,
+      profileKey: lookupDelayProfileKey,
+      onTelemetry: (stats) => {
+        if (!lookupTelemetry || typeof lookupTelemetry !== "object") return;
+        lookupTelemetry.club = stats;
+      },
+    });
     if (dedupe) players = dedupeById(players);
     if (ignoreLoaned) players = players.filter((p) => !p.isLimitedUse?.());
     if (onlyFemales)
@@ -673,8 +912,15 @@
       onlyUntradables,
       onlyTradables,
       playerId,
+      playerIds,
       dedupe = true,
       skipStats = true,
+      lookupDelaySeconds = DEFAULT_SEARCH_PAGE_DELAY_SECONDS,
+      lookupDelayAdaptive = false,
+      lookupDelaySafeSeconds = DEFAULT_SEARCH_PAGE_DELAY_SECONDS,
+      lookupDelayCooldownMs = APPLY_LOOKUP_ADAPTIVE_COOLDOWN_MS,
+      lookupDelayProfileKey = null,
+      lookupTelemetry = null,
     } = opts;
 
     if (!skipStats && services.Club?.clubDao?.resetStatsCache) {
@@ -689,10 +935,21 @@
       onlyUntradables,
       onlyTradables,
       playerId,
+      playerIds,
     });
 
     // Small delay between pages helps avoid FUT rate limits on large clubs.
-    let players = await fetchAllPages(searchClub, searchCriteria, 0.25);
+    let players = await fetchAllPages(searchClub, searchCriteria, {
+      baseDelaySeconds: lookupDelaySeconds,
+      adaptive: lookupDelayAdaptive,
+      safeDelaySeconds: lookupDelaySafeSeconds,
+      cooldownMs: lookupDelayCooldownMs,
+      profileKey: lookupDelayProfileKey,
+      onTelemetry: (stats) => {
+        if (!lookupTelemetry || typeof lookupTelemetry !== "object") return;
+        lookupTelemetry.club = stats;
+      },
+    });
     if (dedupe) players = dedupeById(players);
     if (ignoreLoaned) players = players.filter((p) => !p.isLimitedUse?.());
     if (onlyFemales)
@@ -700,9 +957,36 @@
     return players;
   };
 
-  const getStorageItems = async () => {
-    const criteria = formSearchCriteria();
-    return fetchAllPages(searchStorage, criteria, 0.25);
+  const getStorageItems = async (opts = {}) => {
+    const {
+      playerId = null,
+      playerIds = null,
+      lookupDelaySeconds = DEFAULT_SEARCH_PAGE_DELAY_SECONDS,
+      lookupDelayAdaptive = false,
+      lookupDelaySafeSeconds = DEFAULT_SEARCH_PAGE_DELAY_SECONDS,
+      lookupDelayCooldownMs = APPLY_LOOKUP_ADAPTIVE_COOLDOWN_MS,
+      lookupDelayProfileKey = null,
+      lookupTelemetry = null,
+    } = opts;
+    const criteria = formSearchCriteria({
+      playerIds:
+        Array.isArray(playerIds) && playerIds.length
+          ? playerIds
+          : playerId != null
+            ? [playerId]
+            : [],
+    });
+    return fetchAllPages(searchStorage, criteria, {
+      baseDelaySeconds: lookupDelaySeconds,
+      adaptive: lookupDelayAdaptive,
+      safeDelaySeconds: lookupDelaySafeSeconds,
+      cooldownMs: lookupDelayCooldownMs,
+      profileKey: lookupDelayProfileKey,
+      onTelemetry: (stats) => {
+        if (!lookupTelemetry || typeof lookupTelemetry !== "object") return;
+        lookupTelemetry.storage = stats;
+      },
+    });
   };
 
   const buildExcludedStorageIds = (players, extraDefIds) => {
@@ -807,7 +1091,10 @@
 
   const getPlayersFetchKey = (options = {}) => {
     const normalized = normalizePlayersFetchOptions(options);
-    return JSON.stringify(normalized);
+    return JSON.stringify({
+      ...normalized,
+      _cacheRevision: Number(playersFetchCacheRevision ?? 0),
+    });
   };
 
   const fetchPlayersSnapshot = async (options = {}) => {
@@ -857,10 +1144,15 @@
     return promise;
   };
 
-  const clearPlayersSnapshotCache = () => {
+  const clearPlayersSnapshotCache = ({
+    clearWarmLookup = false,
+    bumpRevision = false,
+  } = {}) => {
     playersFetchInFlightByKey.clear();
     playersFetchCacheByKey.clear();
     activeSquadDefIdsCache = null;
+    if (clearWarmLookup) recentApplyLookupCache = null;
+    if (bumpRevision) playersFetchCacheRevision += 1;
   };
 
   const getPlayersSnapshotStatus = (options = {}) => {
@@ -868,11 +1160,138 @@
     const cached = playersFetchCacheByKey.get(key) ?? null;
     return {
       key,
+      revision: Number(playersFetchCacheRevision ?? 0),
       inFlight: playersFetchInFlightByKey.has(key),
       cachedAt: cached ? new Date(cached.at).toISOString() : null,
       cachedAgeMs: cached ? Date.now() - cached.at : null,
     };
   };
+
+  const APPLY_PERF_HISTORY_LIMIT = 200;
+
+  const computeSeriesStats = (values = []) => {
+    const nums = (Array.isArray(values) ? values : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value))
+      .sort((a, b) => a - b);
+    if (!nums.length) return null;
+    const at = (pct) => {
+      const idx = Math.max(
+        0,
+        Math.min(nums.length - 1, Math.floor((nums.length - 1) * pct)),
+      );
+      return nums[idx];
+    };
+    const sum = nums.reduce((total, value) => total + value, 0);
+    return {
+      count: nums.length,
+      min: nums[0],
+      median: at(0.5),
+      p95: at(0.95),
+      max: nums[nums.length - 1],
+      mean: Number((sum / nums.length).toFixed(2)),
+    };
+  };
+
+  const ensureApplyPerfCollector = () => {
+    try {
+      const root = (window.__eaDataPerf = window.__eaDataPerf || {});
+      if (!Array.isArray(root.applyRuns)) root.applyRuns = [];
+      if (typeof root.getApplyRuns !== "function") {
+        root.getApplyRuns = () =>
+          Array.isArray(root.applyRuns) ? root.applyRuns.slice() : [];
+      }
+      if (typeof root.clearApplyRuns !== "function") {
+        root.clearApplyRuns = () => {
+          root.applyRuns = [];
+        };
+      }
+      if (typeof root.summarizeApplyRuns !== "function") {
+        root.summarizeApplyRuns = (filters = {}) => {
+          const runs = Array.isArray(root.applyRuns) ? root.applyRuns : [];
+          const challengeId =
+            filters?.challengeId == null ? null : String(filters.challengeId);
+          const preHydratedChallenge =
+            filters?.preHydratedChallenge == null
+              ? null
+              : Boolean(filters.preHydratedChallenge);
+          const retryTriggered =
+            filters?.retryTriggered == null
+              ? null
+              : Boolean(filters.retryTriggered);
+          const selected = runs.filter((run) => {
+            if (!run || typeof run !== "object") return false;
+            if (
+              challengeId != null &&
+              String(run?.challengeId ?? "") !== challengeId
+            ) {
+              return false;
+            }
+            if (
+              preHydratedChallenge != null &&
+              Boolean(run?.preHydratedChallenge) !== preHydratedChallenge
+            ) {
+              return false;
+            }
+            if (
+              retryTriggered != null &&
+              Boolean(run?.retryTriggered) !== retryTriggered
+            ) {
+              return false;
+            }
+            return true;
+          });
+          const retryCount = selected.filter((run) =>
+            Boolean(run?.retryTriggered),
+          ).length;
+          const warmCacheUseCount = selected.filter((run) =>
+            Boolean(run?.lookupWarmCacheUsed),
+          ).length;
+          const retryRate =
+            selected.length > 0
+              ? Number(((retryCount / selected.length) * 100).toFixed(2))
+              : 0;
+          const warmCacheUseRate =
+            selected.length > 0
+              ? Number(((warmCacheUseCount / selected.length) * 100).toFixed(2))
+              : 0;
+          return {
+            count: selected.length,
+            retryRatePct: retryRate,
+            lookupWarmCacheUseRatePct: warmCacheUseRate,
+            applyTotalMs: computeSeriesStats(
+              selected.map((run) => run?.applyTotalMs),
+            ),
+            lookupMs: computeSeriesStats(selected.map((run) => run?.lookupMs)),
+            loadMs: computeSeriesStats(selected.map((run) => run?.loadMs)),
+            saveMs: computeSeriesStats(selected.map((run) => run?.saveMs)),
+            lookupRetryableAttempts: computeSeriesStats(
+              selected.map((run) => run?.lookupRetryableAttempts),
+            ),
+            lookupDelayAppliedMs: computeSeriesStats(
+              selected.map((run) => run?.lookupDelayAppliedMs),
+            ),
+          };
+        };
+      }
+      return root;
+    } catch {
+      return null;
+    }
+  };
+
+  const recordApplyPerfRun = (sample) => {
+    const root = ensureApplyPerfCollector();
+    if (!root) return;
+    const runs = Array.isArray(root.applyRuns) ? root.applyRuns : [];
+    runs.push(sample);
+    if (runs.length > APPLY_PERF_HISTORY_LIMIT) {
+      runs.splice(0, runs.length - APPLY_PERF_HISTORY_LIMIT);
+    }
+    root.applyRuns = runs;
+  };
+  // Eagerly initialize perf collector so console helpers are always available.
+  ensureApplyPerfCollector();
 
   const moveItemsToClub = async (items) => {
     if (!items?.length) return 0;
@@ -887,8 +1306,8 @@
     return movable.length;
   };
 
-  const getStoragePlayers = async (duplicateDefIds) => {
-    const players = await getStorageItems();
+  const getStoragePlayers = async (duplicateDefIds, options = {}) => {
+    const players = await getStorageItems(options);
     return players
       .filter((player) => !player?.isEnrolledInAcademy?.())
       .map((player) =>
@@ -925,7 +1344,66 @@
     const { raw = false, ...lookupOptions } = options ?? {};
     const [clubPlayers, storagePlayers] = await Promise.all([
       raw ? getClubItems(lookupOptions) : getClubPlayers(lookupOptions),
-      raw ? getStorageItems() : getStoragePlayers(),
+      raw
+        ? getStorageItems(lookupOptions)
+        : getStoragePlayers(null, lookupOptions),
+    ]);
+    const lookup = new Map();
+    for (const player of clubPlayers) {
+      if (!player) continue;
+      if (player?.isEnrolledInAcademy?.()) continue;
+      const id = player[key] ?? player.id;
+      addPlayerToLookup(lookup, id, player);
+    }
+    for (const player of storagePlayers) {
+      if (!player) continue;
+      if (player?.isEnrolledInAcademy?.()) continue;
+      const id = player[key] ?? player.id;
+      addPlayerToLookup(lookup, id, player);
+    }
+    return lookup;
+  };
+
+  const lookupHasAllIds = (lookup, ids = []) => {
+    if (!(lookup instanceof Map)) return false;
+    for (const id of ids || []) {
+      if (id == null) continue;
+      if (!lookup.has(id) && !lookup.has(String(id))) return false;
+    }
+    return true;
+  };
+
+  const buildTargetedLookupForSolutionIds = async (
+    ids = [],
+    playerById = null,
+    key = "id",
+    options = {},
+  ) => {
+    const sourceIds = Array.isArray(ids) ? ids.filter((id) => id != null) : [];
+    if (!sourceIds.length) return null;
+    const defIdSet = new Set();
+    for (const id of sourceIds) {
+      const player =
+        playerById?.get?.(String(id)) ??
+        playerById?.get?.(id) ??
+        playerById?.[String(id)] ??
+        playerById?.[id] ??
+        null;
+      const defId = Number(player?.definitionId);
+      if (!Number.isFinite(defId)) continue;
+      defIdSet.add(defId);
+    }
+    const playerIds = Array.from(defIdSet);
+    if (!playerIds.length) return null;
+
+    const { raw = false, ...lookupOptions } = options ?? {};
+    const [clubPlayers, storagePlayers] = await Promise.all([
+      raw
+        ? getClubItems({ ...lookupOptions, playerIds })
+        : getClubPlayers({ ...lookupOptions, playerIds }),
+      raw
+        ? getStorageItems({ ...lookupOptions, playerIds })
+        : getStoragePlayers(null, { ...lookupOptions, playerIds }),
     ]);
     const lookup = new Map();
     for (const player of clubPlayers) {
@@ -1226,24 +1704,114 @@
     if (!challenge?.squad) return [];
     const lookupKey = options.lookupKey ?? "id";
     const playerById = options?.playerById ?? null;
+    const preHydratedChallenge = options?.preHydratedChallenge === true;
+    const perfStartedAt = Date.now();
+    const perf = {
+      lookupMs: 0,
+      lookupCount: 0,
+      lookupWarmCacheUsed: false,
+      lookupClubPages: 0,
+      lookupStoragePages: 0,
+      lookupRetryableAttempts: 0,
+      lookupRetryablePages: 0,
+      lookupDelayAppliedMs: 0,
+      lookupAdaptiveEscalated: false,
+      lookupAdaptiveSafeModeStart: false,
+      moveMs: 0,
+      moveCount: 0,
+      movedItemCount: 0,
+      moveCallsWithWork: 0,
+      loadMs: 0,
+      loadCount: 0,
+      saveMs: 0,
+      saveCount: 0,
+      retryTriggered: false,
+      retryMissingCount: 0,
+      preApplyLoadSkipped: false,
+    };
+    const withPerf = async (msKey, countKey, fn) => {
+      const startedAt = Date.now();
+      try {
+        return await fn();
+      } finally {
+        perf[msKey] = (perf[msKey] ?? 0) + (Date.now() - startedAt);
+        perf[countKey] = (perf[countKey] ?? 0) + 1;
+      }
+    };
     // ── Per-apply-run lookup cache ──────────────────────────────────────────
     // Each getSquadLookupForSbc call fetches ALL club + storage items via
     // paginated API.  Within a single apply run the inventory only changes
     // when moveItemsToClub actually moves items between piles.  By caching
     // the result and forcing a refresh only after a confirmed move we cut
     // most apply runs from 1-4 full scans down to 1.
-    const lookupOpts = {
-      ignoreLoaned: true,
-      excludeActiveSquad: true,
-      raw: true,
-      skipStats: true,
-    };
+    const lookupTelemetry = {};
+    const lookupOpts = createApplyLookupOptions({
+      telemetry: lookupTelemetry,
+    });
     let cachedLookup = null;
     let lookupFetchCount = 0;
+    const requestedIds = (ids || []).filter((id) => id != null);
+    const warmLookup = readWarmApplyLookup(lookupKey, requestedIds);
+    if (warmLookup) perf.lookupWarmCacheUsed = true;
     const getCachedLookup = async (force = false) => {
       if (cachedLookup && !force) return cachedLookup;
-      cachedLookup = await getSquadLookupForSbc(lookupKey, lookupOpts);
+      delete lookupTelemetry.club;
+      delete lookupTelemetry.storage;
+      cachedLookup = await withPerf("lookupMs", "lookupCount", () =>
+        getSquadLookupForSbc(lookupKey, lookupOpts),
+      );
+      const clubPages = Number(lookupTelemetry?.club?.pages ?? 0);
+      const storagePages = Number(lookupTelemetry?.storage?.pages ?? 0);
+      const clubRetryableAttempts = Number(
+        lookupTelemetry?.club?.retryableAttempts ?? 0,
+      );
+      const storageRetryableAttempts = Number(
+        lookupTelemetry?.storage?.retryableAttempts ?? 0,
+      );
+      const clubRetryablePages = Number(
+        lookupTelemetry?.club?.retryablePages ?? 0,
+      );
+      const storageRetryablePages = Number(
+        lookupTelemetry?.storage?.retryablePages ?? 0,
+      );
+      const clubDelayAppliedMs = Number(
+        lookupTelemetry?.club?.delayAppliedMs ?? 0,
+      );
+      const storageDelayAppliedMs = Number(
+        lookupTelemetry?.storage?.delayAppliedMs ?? 0,
+      );
+      perf.lookupClubPages += Number.isFinite(clubPages) ? clubPages : 0;
+      perf.lookupStoragePages += Number.isFinite(storagePages)
+        ? storagePages
+        : 0;
+      perf.lookupRetryableAttempts += Number.isFinite(clubRetryableAttempts)
+        ? clubRetryableAttempts
+        : 0;
+      perf.lookupRetryableAttempts += Number.isFinite(storageRetryableAttempts)
+        ? storageRetryableAttempts
+        : 0;
+      perf.lookupRetryablePages += Number.isFinite(clubRetryablePages)
+        ? clubRetryablePages
+        : 0;
+      perf.lookupRetryablePages += Number.isFinite(storageRetryablePages)
+        ? storageRetryablePages
+        : 0;
+      perf.lookupDelayAppliedMs += Number.isFinite(clubDelayAppliedMs)
+        ? clubDelayAppliedMs
+        : 0;
+      perf.lookupDelayAppliedMs += Number.isFinite(storageDelayAppliedMs)
+        ? storageDelayAppliedMs
+        : 0;
+      perf.lookupAdaptiveEscalated =
+        perf.lookupAdaptiveEscalated ||
+        Boolean(lookupTelemetry?.club?.adaptiveEscalated) ||
+        Boolean(lookupTelemetry?.storage?.adaptiveEscalated);
+      perf.lookupAdaptiveSafeModeStart =
+        perf.lookupAdaptiveSafeModeStart ||
+        Boolean(lookupTelemetry?.club?.adaptiveSafeModeStart) ||
+        Boolean(lookupTelemetry?.storage?.adaptiveSafeModeStart);
       lookupFetchCount += 1;
+      writeWarmApplyLookup(lookupKey, cachedLookup);
       return cachedLookup;
     };
     const getPlayerFromIdMap = (id) => {
@@ -1289,7 +1857,7 @@
         }
       }
     } catch {}
-    const lookup = await getCachedLookup();
+    const lookup = warmLookup ?? (await getCachedLookup());
     const ItemPile =
       services?.Item?.UTItemPileEnum ?? window?.UTItemPileEnum ?? {};
     const clubPile = ItemPile.CLUB ?? 7;
@@ -1432,9 +2000,16 @@
       applyLookup.set(String(item.id), item);
     }
     const effectiveLookup = applyLookup.size ? applyLookup : lookup;
-    const loadBeforeApply = await loadChallenge(challenge, true, {
-      force: true,
-    });
+    const shouldSkipPreApplyLoad =
+      preHydratedChallenge && challenge?.squad?.setPlayers;
+    perf.preApplyLoadSkipped = Boolean(shouldSkipPreApplyLoad);
+    const loadBeforeApply = shouldSkipPreApplyLoad
+      ? null
+      : await withPerf("loadMs", "loadCount", () =>
+          loadChallenge(challenge, true, {
+            force: true,
+          }),
+        );
     const squadEntity =
       challenge?.squad ??
       loadBeforeApply?.data?.squad ??
@@ -1653,7 +2228,13 @@
     const moveCandidates = resolvedItems.filter(
       (item) => item?.pile === storagePile,
     );
-    const movedCount = await moveItemsToClub(moveCandidates);
+    const movedCount = await withPerf("moveMs", "moveCount", () =>
+      moveItemsToClub(moveCandidates),
+    );
+    if (movedCount > 0) {
+      perf.movedItemCount += movedCount;
+      perf.moveCallsWithWork += 1;
+    }
     if (movedCount > 0) {
       const refreshedLookup = await getCachedLookup(true);
       applyLookup.clear();
@@ -1684,24 +2265,35 @@
       return Boolean(item?.concept);
     });
     if (conceptItems.length) {
-      throw new Error(
+      const error = new Error(
         `Cannot apply squad: ${conceptItems.length} player(s) missing from club/storage (concept cards).`,
       );
+      error.code = "EA_APPLY_IDS_MISSING";
+      error.meta = {
+        conceptCount: conceptItems.length,
+        requestedCount: applyIds?.length ?? 0,
+        unresolvedIds,
+      };
+      throw error;
     }
     squadEntity.removeAllItems?.();
     squadEntity.setPlayers(playersToApply, true);
-    const saveRes = await saveChallenge(challenge);
+    const saveRes = await withPerf("saveMs", "saveCount", () =>
+      saveChallenge(challenge),
+    );
     if (isSbcAutomationActive() && saveRes?.success !== true) {
       throw new Error(
         `saveChallenge failed (status ${saveRes?.status ?? "?"}, error ${saveRes?.error ?? "?"})`,
       );
     }
 
-    // FC Enhancer pattern: hydrate applied items from DAO load, then push them
+    // Hydrate applied items from DAO load, then push them
     // into the original challenge squad instance to keep UI interactions intact.
     const resolveLoadedSquadEntity = (loaded) =>
       loaded?.data?.squad ?? loaded?.squad ?? null;
-    const lastLoaded = await loadChallenge(challenge, true, { force: true });
+    const lastLoaded = await withPerf("loadMs", "loadCount", () =>
+      loadChallenge(challenge, true, { force: true }),
+    );
     let canonicalSquadEntity =
       resolveLoadedSquadEntity(lastLoaded) ?? squadEntity ?? null;
     let attemptSlots =
@@ -1713,6 +2305,8 @@
       [];
     const attemptSummary = summarizeSquad(attemptSlots, "apply");
     if (attemptSummary?.missingAfterApply?.length) {
+      perf.retryTriggered = true;
+      perf.retryMissingCount = attemptSummary.missingAfterApply.length;
       const refreshedLookup = await getCachedLookup();
       const missingItems = attemptSummary.missingAfterApply
         .map(
@@ -1722,7 +2316,13 @@
             null,
         )
         .filter(Boolean);
-      const movedMissing = await moveItemsToClub(missingItems);
+      const movedMissing = await withPerf("moveMs", "moveCount", () =>
+        moveItemsToClub(missingItems),
+      );
+      if (movedMissing > 0) {
+        perf.movedItemCount += movedMissing;
+        perf.moveCallsWithWork += 1;
+      }
       if (movedMissing > 0) {
         const updatedLookup = await getCachedLookup(true);
         applyLookup.clear();
@@ -1750,22 +2350,33 @@
         return Boolean(item?.concept);
       });
       if (retryConceptItems.length) {
-        throw new Error(
+        const error = new Error(
           `Cannot apply squad: ${retryConceptItems.length} player(s) missing from club/storage (concept cards).`,
         );
+        error.code = "EA_APPLY_IDS_MISSING";
+        error.meta = {
+          conceptCount: retryConceptItems.length,
+          requestedCount: applyIds?.length ?? 0,
+          unresolvedIds,
+        };
+        throw error;
       }
       squadEntity.removeAllItems?.();
       squadEntity.setPlayers(retryPlayersToApply, true);
       await delay(0.5);
-      const saveRetryRes = await saveChallenge(challenge);
+      const saveRetryRes = await withPerf("saveMs", "saveCount", () =>
+        saveChallenge(challenge),
+      );
       if (isSbcAutomationActive() && saveRetryRes?.success !== true) {
         throw new Error(
           `saveChallenge failed (status ${saveRetryRes?.status ?? "?"}, error ${saveRetryRes?.error ?? "?"})`,
         );
       }
-      const retryLoaded = await loadChallenge(challenge, true, {
-        force: true,
-      });
+      const retryLoaded = await withPerf("loadMs", "loadCount", () =>
+        loadChallenge(challenge, true, {
+          force: true,
+        }),
+      );
       canonicalSquadEntity =
         resolveLoadedSquadEntity(retryLoaded) ??
         canonicalSquadEntity ??
@@ -1804,7 +2415,348 @@
     try {
       clearPlayersSnapshotCache();
     } catch {}
+    recordApplyPerfRun({
+      at: new Date().toISOString(),
+      challengeId: challenge?.id ?? null,
+      preHydratedChallenge: Boolean(preHydratedChallenge),
+      preApplyLoadSkipped: Boolean(perf.preApplyLoadSkipped),
+      requested: applyIds?.length ?? 0,
+      lookupMs: perf.lookupMs,
+      lookupCount: perf.lookupCount,
+      lookupWarmCacheUsed: Boolean(perf.lookupWarmCacheUsed),
+      lookupFetches: lookupFetchCount,
+      lookupClubPages: perf.lookupClubPages,
+      lookupStoragePages: perf.lookupStoragePages,
+      lookupRetryableAttempts: perf.lookupRetryableAttempts,
+      lookupRetryablePages: perf.lookupRetryablePages,
+      lookupDelayAppliedMs: perf.lookupDelayAppliedMs,
+      lookupAdaptiveEscalated: Boolean(perf.lookupAdaptiveEscalated),
+      lookupAdaptiveSafeModeStart: Boolean(perf.lookupAdaptiveSafeModeStart),
+      moveMs: perf.moveMs,
+      moveCount: perf.moveCount,
+      movedItemCount: perf.movedItemCount,
+      moveCallsWithWork: perf.moveCallsWithWork,
+      loadMs: perf.loadMs,
+      loadCount: perf.loadCount,
+      saveMs: perf.saveMs,
+      saveCount: perf.saveCount,
+      retryTriggered: Boolean(perf.retryTriggered),
+      retryMissingCount: perf.retryMissingCount,
+      applyTotalMs: Date.now() - perfStartedAt,
+    });
+    log("debug", "[EA Data] Solver apply perf", {
+      ...perf,
+      applyTotalMs: Date.now() - perfStartedAt,
+      requested: applyIds?.length ?? 0,
+      lookupFetches: lookupFetchCount,
+    });
     return finalItems;
+  };
+
+  const readAppliedItemsFromChallenge = (challenge) => {
+    const slots = challenge?.squad?.getPlayers?.() ?? [];
+    return Array.isArray(slots)
+      ? slots.map((slot) => resolveSlotItem(slot) ?? slot ?? null)
+      : [];
+  };
+
+  const experimentToArray = (value) => (Array.isArray(value) ? value : []);
+
+  const experimentLookupById = (lookup, id) => {
+    if (!lookup || id == null) return null;
+    return lookup.get(id) ?? lookup.get(String(id)) ?? null;
+  };
+
+  const experimentReadDefinitionId = (playerById, id) => {
+    if (!playerById || id == null) return null;
+    const key = String(id);
+    const player =
+      playerById.get?.(key) ??
+      playerById.get?.(id) ??
+      playerById[key] ??
+      playerById[id] ??
+      null;
+    const defId = Number(player?.definitionId);
+    return Number.isFinite(defId) ? defId : null;
+  };
+
+  const experimentCreateConceptItem = (definitionId) => {
+    const defId = Number(definitionId);
+    if (!Number.isFinite(defId)) return null;
+    const ItemCtor = window?.UTItemEntity ?? globalThis?.UTItemEntity;
+    if (typeof ItemCtor !== "function") return null;
+    const item = new ItemCtor();
+    item.id = defId;
+    item.definitionId = defId;
+    item.concept = true;
+    item.stackCount = 1;
+    return item;
+  };
+
+  const experimentGetLoadedSquadEntity = (loaded, challenge) =>
+    loaded?.data?.squad ?? loaded?.squad ?? challenge?.squad ?? null;
+
+  const experimentIsRealItem = (item) => {
+    if (!item) return false;
+    const id = item?.id ?? 0;
+    const definitionId = item?.definitionId ?? 0;
+    const concept =
+      typeof item?.isConcept === "function"
+        ? item.isConcept()
+        : Boolean(item?.concept);
+    return (id !== 0 || definitionId !== 0) && !concept;
+  };
+
+  const experimentGetLoadedItems = (loaded, challenge) => {
+    const squad = experimentGetLoadedSquadEntity(loaded, challenge);
+    const slots = experimentToArray(squad?.getPlayers?.());
+    return slots
+      .map((slot) => resolveSlotItem(slot) ?? slot ?? null)
+      .filter(experimentIsRealItem);
+  };
+
+  const experimentGetLoadedUiItems = (loaded, challenge) => {
+    const squad = experimentGetLoadedSquadEntity(loaded, challenge);
+    const slots = experimentToArray(squad?.getPlayers?.());
+    return slots.map((slot) => resolveSlotItem(slot) ?? slot ?? null);
+  };
+
+  const applyExperimentalHybridResearch = async ({
+    challenge,
+    solutionIds,
+    lookup,
+    getLookup,
+    playerById,
+    slotSolution,
+    preserveExistingValid = false,
+    onApplied,
+  }) => {
+    if (!challenge?.squad) {
+      return {
+        ok: false,
+        reason: "NO_SQUAD",
+        appliedCount: 0,
+      };
+    }
+
+    const ids = experimentToArray(solutionIds).filter((id) => id != null);
+    const resolvedLookup =
+      lookup instanceof Map
+        ? lookup
+        : typeof getLookup === "function"
+          ? await getLookup()
+          : null;
+
+    if (!(resolvedLookup instanceof Map)) {
+      throw new Error("lookup Map is required (or provide getLookup)");
+    }
+
+    const conceptIds = [];
+    const missingIds = [];
+    const applyLookup = new Map();
+    for (const id of ids) {
+      const match = experimentLookupById(resolvedLookup, id);
+      if (match) {
+        if (match.id != null) {
+          applyLookup.set(match.id, match);
+          applyLookup.set(String(match.id), match);
+        }
+        continue;
+      }
+      const defId = experimentReadDefinitionId(playerById, id);
+      const concept = experimentCreateConceptItem(defId ?? id);
+      if (concept) {
+        conceptIds.push(id);
+        if (concept.id != null) {
+          applyLookup.set(concept.id, concept);
+          applyLookup.set(String(concept.id), concept);
+        }
+        continue;
+      }
+      missingIds.push(id);
+    }
+
+    if (!applyLookup.size) {
+      return {
+        ok: false,
+        reason: "NO_APPLY_ITEMS",
+        missingIds,
+        conceptIds,
+        appliedCount: 0,
+      };
+    }
+
+    const liveSquad = challenge.squad;
+    const playersForSet = buildPreservedSlotList(
+      liveSquad,
+      ids,
+      applyLookup.size ? applyLookup : resolvedLookup,
+      slotSolution ?? null,
+      preserveExistingValid,
+    );
+    liveSquad.removeAllItems?.();
+    liveSquad.setPlayers(playersForSet, true);
+
+    const saveResult = await saveChallenge(challenge);
+    const loaded = await loadChallenge(challenge, true, { force: true });
+    const loadedItems = experimentGetLoadedItems(loaded, challenge);
+    const loadedItemsForUi = experimentGetLoadedUiItems(loaded, challenge);
+    const finalItemsForUi =
+      loadedItemsForUi.length > 0 ? loadedItemsForUi : playersForSet;
+    if (finalItemsForUi.length > 0) {
+      liveSquad.setPlayers(finalItemsForUi, true);
+    }
+    try {
+      challenge.squad = liveSquad;
+    } catch {}
+    try {
+      challenge.onDataChange?.notify?.({ squad: liveSquad });
+    } catch {}
+    const hydratedCount =
+      loadedItems.length ||
+      playersForSet.filter((item) => experimentIsRealItem(item)).length;
+    const appliedCount = hydratedCount;
+    const isPartialApply = appliedCount < ids.length;
+    try {
+      onApplied?.({
+        challengeId: challenge?.id ?? null,
+        requested: ids.length,
+        applied: appliedCount,
+        concepts: conceptIds.length,
+        missing: missingIds.length,
+        partial: isPartialApply,
+      });
+    } catch {}
+
+    return {
+      ok: !isPartialApply,
+      reason: isPartialApply ? "PARTIAL_APPLY" : null,
+      saveResult,
+      requested: ids.length,
+      appliedCount,
+      conceptIds,
+      missingIds,
+      usedLookup: true,
+    };
+  };
+
+  const applySolutionWithExperimentalHybrid = async (
+    challenge,
+    solutionIds = [],
+    options = {},
+  ) => {
+    if (!challenge?.squad) {
+      throw new Error("No open challenge available for experimental apply.");
+    }
+
+    const ids = Array.isArray(solutionIds)
+      ? solutionIds.filter((id) => id != null)
+      : [];
+    if (!ids.length) {
+      return {
+        ok: false,
+        reason: "NO_IDS",
+        appliedCount: 0,
+      };
+    }
+
+    const lookupKey = options?.lookupKey ?? "id";
+    const playerById = options?.playerById ?? null;
+    const startedAt = Date.now();
+    const warmLookup = readWarmApplyLookup(lookupKey, ids);
+    const lookupOptions = createApplyLookupOptions();
+    let targetedLookup = null;
+    if (!warmLookup) {
+      try {
+        targetedLookup = await buildTargetedLookupForSolutionIds(
+          ids,
+          playerById,
+          lookupKey,
+          createTargetedApplyLookupOptions(),
+        );
+      } catch (error) {
+        log("debug", "[EA Data] Targeted lookup failed", {
+          challengeId: challenge?.id ?? null,
+          error: String(error?.message ?? error),
+        });
+      }
+    }
+    const targetedLookupCoveredAll = lookupHasAllIds(targetedLookup, ids);
+    const seedLookup =
+      warmLookup ?? (targetedLookupCoveredAll ? targetedLookup : null);
+
+    const result = await applyExperimentalHybridResearch({
+      challenge,
+      solutionIds: ids,
+      lookup: seedLookup,
+      getLookup: async () => {
+        const lookup = await getSquadLookupForSbc(lookupKey, lookupOptions);
+        if (lookup instanceof Map) writeWarmApplyLookup(lookupKey, lookup);
+        return lookup;
+      },
+      playerById,
+      slotSolution: options?.slotSolution ?? null,
+      preserveExistingValid: options?.preserveExistingValid !== false,
+      onApplied: (stats) => {
+        log("debug", "[EA Data] Experimental apply applied", stats);
+      },
+    });
+
+    log("debug", "[EA Data] Experimental apply", {
+      challengeId: challenge?.id ?? null,
+      requested: ids.length,
+      ok: Boolean(result?.ok),
+      usedWarmLookup: Boolean(warmLookup),
+      usedTargetedLookup: Boolean(!warmLookup && targetedLookupCoveredAll),
+      targetedLookupCoveredAll: Boolean(targetedLookupCoveredAll),
+      elapsedMs: Date.now() - startedAt,
+      appliedCount: Number(result?.appliedCount ?? 0),
+      conceptCount: Array.isArray(result?.conceptIds)
+        ? result.conceptIds.length
+        : 0,
+      missingCount: Array.isArray(result?.missingIds)
+        ? result.missingIds.length
+        : 0,
+    });
+    return result;
+  };
+
+  const applySolutionWithSelectedMode = async (
+    challenge,
+    solutionIds,
+    options = {},
+  ) => {
+    const mode = normalizeApplyMode(solverApplyMode) ?? APPLY_MODE_DEFAULT;
+    if (mode === APPLY_MODE_EXPERIMENTAL_HYBRID) {
+      try {
+        const experimentalResult = await applySolutionWithExperimentalHybrid(
+          challenge,
+          solutionIds,
+          options,
+        );
+        if (experimentalResult?.ok) {
+          return readAppliedItemsFromChallenge(challenge);
+        }
+        log(
+          "debug",
+          "[EA Data] Experimental apply returned non-ok; falling back to default apply",
+          {
+            challengeId: challenge?.id ?? null,
+            reason: experimentalResult?.reason ?? "UNKNOWN",
+          },
+        );
+      } catch (error) {
+        log(
+          "debug",
+          "[EA Data] Experimental apply failed; falling back to default apply",
+          {
+            challengeId: challenge?.id ?? null,
+            error: String(error?.message ?? error),
+          },
+        );
+      }
+    }
+    return applySolutionToChallenge(challenge, solutionIds, options);
   };
 
   const getChallengesBySetIdsRaw = async (setIds) => {
@@ -2903,6 +3855,8 @@
   // Solve can occasionally take longer (large clubs / chemistry local search).
   // Keep init short, but allow solve to run longer before timing out.
   const SOLVER_BRIDGE_TIMEOUT_MS = 60000;
+  const SOLVER_BRIDGE_CHEM_TIMEOUT_EXTRA_MS = 20000;
+  const SOLVER_BRIDGE_COMPLEX_CHEM_TIMEOUT_EXTRA_MS = 45000;
   const SOLVER_BRIDGE_INIT_TIMEOUT_MS = 10000;
   const SOLVER_BRIDGE_REQUEST = "EA_SOLVER_REQUEST";
   const SOLVER_BRIDGE_RESPONSE = "EA_SOLVER_RESPONSE";
@@ -7326,7 +8280,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         candidates.push({ node, score });
       };
 
-      // FC Enhancer reference: reward claim is driven by UTGameRewardsView._actionBtn root.
+      // Reward claim is driven by UTGameRewardsView._actionBtn root.
       // Reuse captured action roots first for deterministic claim/confirm clicks.
       for (const node of Array.from(rewardActionButtonRoots)) {
         if (!node || !node.isConnected) {
@@ -7336,7 +8290,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         pushCandidate(node, 240);
       }
 
-      // Explicit CTA selectors (including FC Enhancer shortcut classes when present).
+      // Explicit CTA selectors (including legacy shortcut classes when present).
       for (const sel of directSelectors) {
         for (const node of Array.from(document.querySelectorAll(sel) ?? [])) {
           pushCandidate(node, 200);
@@ -7483,7 +8437,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       throw new Error("services.SBC.submitChallenge unavailable");
     }
     const chemistryEnabled = Boolean(services?.Chemistry?.isFeatureEnabled?.());
-    return sbcApiCall(
+    const result = await sbcApiCall(
       "submitChallenge",
       () =>
         observableToPromise(
@@ -7498,6 +8452,13 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         ),
       { minGapMs: SBC_AUTOMATION_SUBMIT_MIN_GAP_MS, maxAttempts: 1 },
     );
+    if (result?.success === true) {
+      clearPlayersSnapshotCache({
+        clearWarmLookup: true,
+        bumpRevision: true,
+      });
+    }
+    return result;
   };
 
   const clearSbcSquad = async (challenge) => {
@@ -8697,8 +9658,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             ...mergedFilters,
             excludedPlayerIds,
           };
-          const result = await callSolverBridge(
-            "SOLVE",
+          const result = await callSolveBridge(
             {
               players: filteredPlayers,
               requirements: safeRequirements,
@@ -8709,7 +9669,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               filters: loopFilters,
               debug: debugEnabled,
             },
-            SOLVER_BRIDGE_TIMEOUT_MS,
+            safeRequirementsNormalized,
           );
           logSolverDebugResult("multi-generate", result, {
             challengeId: startedChallengeId,
@@ -8830,7 +9790,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 
           const sol = solutions[i];
           setStatus(`(${i + 1}/${solutions.length}) Applying players...`);
-          await applySolutionToChallenge(currentChallenge, sol.solutionIds, {
+          await applySolutionWithSelectedMode(currentChallenge, sol.solutionIds, {
             lookupKey: "id",
             slotSolution: sol.slotSolution ?? null,
             playerById: multiSolveOverlayState?.playerById ?? null,
@@ -12128,8 +13088,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               continue;
             }
 
-            const result = await callSolverBridge(
-              "SOLVE",
+            const result = await callSolveBridge(
               {
                 players: filteredPlayers,
                 requirements: safeRequirements,
@@ -12143,7 +13102,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 },
                 debug: debugEnabled,
               },
-              SOLVER_BRIDGE_TIMEOUT_MS,
+              safeRequirementsNormalized,
             );
             logSolverDebugResult("set-generate", result, {
               setId: startedSetId,
@@ -12370,8 +13329,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               break;
             }
 
-            const result = await callSolverBridge(
-              "SOLVE",
+            const result = await callSolveBridge(
               {
                 players: filteredPlayers,
                 requirements: safeRequirements,
@@ -12385,7 +13343,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 },
                 debug: debugEnabled,
               },
-              SOLVER_BRIDGE_TIMEOUT_MS,
+              safeRequirementsNormalized,
             );
             logSolverDebugResult("set-cycle-generate", result, {
               setId: startedSetId,
@@ -12724,7 +13682,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   ? `(Cycle ${batch.cycleIndex}) (${i + 1}/${batchEntries.length}) Applying ${challengeName}...`
                   : `(${i + 1}/${batchEntries.length}) Applying ${challengeName}...`,
               );
-              await applySolutionToChallenge(
+              await applySolutionWithSelectedMode(
                 challengeEntity,
                 entry.solutionIds,
                 {
@@ -12732,6 +13690,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   slotSolution: entry?.slotSolution ?? null,
                   playerById: setSolveOverlayState?.playerById ?? null,
                   preserveExistingValid: false,
+                  preHydratedChallenge: true,
                 },
               );
               await delayMs(jitterMs(350, 0.35));
@@ -12873,8 +13832,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   const reSolveReqsNorm = (
                     reSolveSnapshot?.requirementsNormalized ?? []
                   ).map(serializeNormalizedRequirementForSolver);
-                  const reSolveResult = await callSolverBridge(
-                    "SOLVE",
+                  const reSolveResult = await callSolveBridge(
                     {
                       players: reSolvePlayers,
                       requirements: reSolveReqs,
@@ -12884,7 +13842,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                       filters: reSolveFilters,
                       debug: false,
                     },
-                    SOLVER_BRIDGE_TIMEOUT_MS,
+                    reSolveReqsNorm,
                   );
                   if (!reSolveResult?.solutions?.length) {
                     throw new Error("Re-solve found no feasible squad.");
@@ -12906,7 +13864,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                       ? `(Cycle ${batch.cycleIndex}) (${i + 1}/${batchEntries.length}) Applying ${challengeName} (retry)...`
                       : `(${i + 1}/${batchEntries.length}) Applying ${challengeName} (retry)...`,
                   );
-                  await applySolutionToChallenge(
+                  await applySolutionWithSelectedMode(
                     challengeEntity,
                     newSolutionIds,
                     {
@@ -12914,6 +13872,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                       slotSolution: entry?.slotSolution ?? null,
                       playerById: freshPlayerById,
                       preserveExistingValid: false,
+                      preHydratedChallenge: true,
                     },
                   );
                   await delayMs(jitterMs(350, 0.35));
@@ -13803,28 +14762,32 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           });
           return;
         }
-        const safeRequirements = (
-          payload.openChallenge?.requirements ?? []
-        ).map(serializeRequirementForSolver);
-        const safeRequirementsNormalized = (
-          payload.openChallenge?.requirementsNormalized ?? []
-        ).map((rule) => {
-          if (!rule || typeof rule !== "object") return rule;
-          return {
-            type: rule.type ?? null,
-            key: rule.key ?? null,
-            keyName: rule.keyName ?? null,
-            keyNameNormalized: rule.keyNameNormalized ?? null,
-            typeSource: rule.typeSource ?? null,
-            op: rule.op ?? null,
-            count: rule.count ?? null,
-            derivedCount: rule.derivedCount ?? null,
-            value: rule.value ?? null,
-            scope: rule.scope ?? null,
-            scopeName: rule.scopeName ?? null,
-            label: rule.label ?? null,
-          };
+        const serializeSolveRequirements = (openChallenge) => ({
+          safeRequirements: (
+            openChallenge?.requirements ?? []
+          ).map(serializeRequirementForSolver),
+          safeRequirementsNormalized: (
+            openChallenge?.requirementsNormalized ?? []
+          ).map((rule) => {
+            if (!rule || typeof rule !== "object") return rule;
+            return {
+              type: rule.type ?? null,
+              key: rule.key ?? null,
+              keyName: rule.keyName ?? null,
+              keyNameNormalized: rule.keyNameNormalized ?? null,
+              typeSource: rule.typeSource ?? null,
+              op: rule.op ?? null,
+              count: rule.count ?? null,
+              derivedCount: rule.derivedCount ?? null,
+              value: rule.value ?? null,
+              scope: rule.scope ?? null,
+              scopeName: rule.scopeName ?? null,
+              label: rule.label ?? null,
+            };
+          }),
         });
+        const { safeRequirements, safeRequirementsNormalized } =
+          serializeSolveRequirements(payload?.openChallenge ?? null);
 
         let solverSettings = null;
         try {
@@ -13888,8 +14851,158 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           // so keep those players hard-locked through solver optimization.
           preserveOccupiedSlots: true,
         };
-        const result = await callSolverBridge(
-          "SOLVE",
+        const buildPlayerByIdMap = (sourcePayload) =>
+          new Map(
+            (sourcePayload?.players ?? [])
+              .map((p) => [p?.id != null ? String(p.id) : null, p])
+              .filter(([k]) => k != null),
+          );
+        const buildResolvedSlotSolution = (solveResult, sourcePayload) => {
+          const fromSolver = solveResult?.solutionSlots?.[0] ?? null;
+          if (
+            fromSolver &&
+            Array.isArray(fromSolver.fieldSlotIndices) &&
+            Array.isArray(fromSolver.fieldSlotToPlayerId) &&
+            fromSolver.fieldSlotIndices.length ===
+              fromSolver.fieldSlotToPlayerId.length
+          ) {
+            return fromSolver;
+          }
+          const fieldSlotIndices = (sourcePayload?.squadSlots ?? [])
+            .map((slot) => {
+              const index = readNumeric(slot?.slotIndex);
+              return Number.isFinite(index) ? index : null;
+            })
+            .filter((index) => index != null);
+          const solutionIds = Array.isArray(solveResult?.solutions?.[0])
+            ? solveResult.solutions[0]
+            : [];
+          if (
+            fieldSlotIndices.length &&
+            fieldSlotIndices.length === solutionIds.length
+          ) {
+            return {
+              fieldSlotIndices,
+              fieldSlotToPlayerId: solutionIds.slice(),
+            };
+          }
+          return null;
+        };
+        const isApplyPoolMissingError = (error) => {
+          if (!error) return false;
+          const code = String(error?.code ?? "").trim();
+          if (code === "EA_APPLY_IDS_MISSING") return true;
+          const message = String(error?.message ?? error).toLowerCase();
+          return (
+            message.includes("missing from club/storage") ||
+            message.includes("concept cards")
+          );
+        };
+        const attemptStalePoolRecovery = async (reason = "apply-missing") => {
+          updateLoadingOverlay("Refreshing player pool and retrying solve...");
+          try {
+            clearPlayersSnapshotCache({
+              clearWarmLookup: true,
+              bumpRevision: true,
+            });
+          } catch {}
+          const freshPayload = await window.eaData.getSolverPayload({
+            ignoreLoaned: true,
+            forcePlayersFetch: true,
+          });
+          if (
+            startedChallengeId != null &&
+            currentChallenge?.id !== startedChallengeId
+          ) {
+            throw new Error("Auto-retry aborted: challenge changed.");
+          }
+          const {
+            safeRequirements: retryRequirements,
+            safeRequirementsNormalized: retryRequirementsNormalized,
+          } = serializeSolveRequirements(freshPayload?.openChallenge ?? null);
+          const retryRequiredIds = new Set();
+          try {
+            for (const slot of freshPayload?.squadSlots ?? []) {
+              const item = slot?.item ?? null;
+              const id = item?.id ?? null;
+              const concept = Boolean(item?.concept);
+              if (id && id !== 0 && !concept) {
+                retryRequiredIds.add(String(id));
+              }
+            }
+          } catch {}
+          const retryPoolConflict = buildSolverPoolExclusionConflict({
+            settings: solverSettings,
+            requirementsNormalized: retryRequirementsNormalized,
+            squadSlots: freshPayload?.squadSlots ?? [],
+          });
+          if (retryPoolConflict?.hasConflict) {
+            const notice = buildSolverPoolConflictNotice(retryPoolConflict);
+            throw new Error(
+              notice?.message ??
+                "Auto-retry blocked: pool exclusions conflict with requirements.",
+            );
+          }
+          const retryAllPlayers = Array.isArray(freshPayload?.players)
+            ? freshPayload.players
+            : [];
+          const { filteredPlayers: retryPlayers, poolFilters: retryPoolFilters } =
+            filterPlayersBySolverPoolSettings(retryAllPlayers, solverSettings, {
+              requiredIds: retryRequiredIds,
+            });
+          const retryMergedFilters = {
+            ...(freshPayload?.filters && typeof freshPayload.filters === "object"
+              ? freshPayload.filters
+              : {}),
+            ...retryPoolFilters,
+            preserveOccupiedSlots: true,
+          };
+          console.log("[EA Data] Player pool filter (retry)", {
+            ...retryPoolFilters,
+            before: retryAllPlayers.length,
+            after: retryPlayers.length,
+            required: retryRequiredIds.size,
+            reason,
+          });
+          const retryResult = await callSolveBridge(
+            {
+              players: retryPlayers,
+              requirements: retryRequirements,
+              requirementsNormalized: retryRequirementsNormalized,
+              requiredPlayers: freshPayload?.requiredPlayers ?? null,
+              squadSlots: freshPayload?.squadSlots ?? [],
+              prioritize: freshPayload?.prioritize,
+              filters: retryMergedFilters,
+              debug: debugEnabled,
+            },
+            retryRequirementsNormalized,
+          );
+          logSolverDebugResult("single-recover", retryResult, {
+            challengeId: startedChallengeId,
+            reason,
+          });
+          if (!Array.isArray(retryResult?.solutions) || !retryResult.solutions.length) {
+            throw new Error("Auto-retry solve found no feasible squad.");
+          }
+          const retrySlotSolution = buildResolvedSlotSolution(
+            retryResult,
+            freshPayload,
+          );
+          await applySolutionWithSelectedMode(
+            currentChallenge,
+            retryResult.solutions[0],
+            {
+              lookupKey: "id",
+              slotSolution: retrySlotSolution,
+              playerById: buildPlayerByIdMap(freshPayload),
+            },
+          );
+          return {
+            payload: freshPayload,
+            result: retryResult,
+          };
+        };
+        const result = await callSolveBridge(
           {
             players: filteredPlayers,
             requirements: safeRequirements,
@@ -13900,7 +15013,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             filters: mergedFilters,
             debug: debugEnabled,
           },
-          SOLVER_BRIDGE_TIMEOUT_MS,
+          safeRequirementsNormalized,
         );
         clearTimeout(slowSolveTimer);
         _log("[EA Data] Solver result", result);
@@ -13984,56 +15097,61 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           }
 
           updateLoadingOverlay("Applying squad...");
-          const resolvedSlotSolution = (() => {
-            const fromSolver = result?.solutionSlots?.[0] ?? null;
-            if (
-              fromSolver &&
-              Array.isArray(fromSolver.fieldSlotIndices) &&
-              Array.isArray(fromSolver.fieldSlotToPlayerId) &&
-              fromSolver.fieldSlotIndices.length ===
-                fromSolver.fieldSlotToPlayerId.length
-            ) {
-              return fromSolver;
-            }
-            const fieldSlotIndices = (payload?.squadSlots ?? [])
-              .map((slot) => {
-                const index = readNumeric(slot?.slotIndex);
-                return Number.isFinite(index) ? index : null;
-              })
-              .filter((index) => index != null);
-            const solutionIds = Array.isArray(result?.solutions?.[0])
-              ? result.solutions[0]
-              : [];
-            if (
-              fieldSlotIndices.length &&
-              fieldSlotIndices.length === solutionIds.length
-            ) {
-              return {
-                fieldSlotIndices,
-                fieldSlotToPlayerId: solutionIds.slice(),
-              };
-            }
-            return null;
-          })();
-          await applySolutionToChallenge(
-            currentChallenge,
-            result.solutions[0],
-            {
-              lookupKey: "id",
-              slotSolution: resolvedSlotSolution,
-              playerById: new Map(
-                (payload?.players ?? [])
-                  .map((p) => [p?.id != null ? String(p.id) : null, p])
-                  .filter(([k]) => k != null),
-              ),
-            },
-          );
+          let appliedSolveResult = result;
+          let recovered = false;
+          try {
+            const resolvedSlotSolution = buildResolvedSlotSolution(
+              result,
+              payload,
+            );
+            await applySolutionWithSelectedMode(
+              currentChallenge,
+              result.solutions[0],
+              {
+                lookupKey: "id",
+                slotSolution: resolvedSlotSolution,
+                playerById: buildPlayerByIdMap(payload),
+              },
+            );
+          } catch (applyError) {
+            if (!isApplyPoolMissingError(applyError)) throw applyError;
+            console.log(
+              "[EA Data] Apply failed due missing inventory items; attempting auto-recovery",
+              {
+                challengeId: currentChallenge?.id ?? null,
+                error: String(applyError?.message ?? applyError),
+              },
+            );
+            const retryOutcome = await attemptStalePoolRecovery(
+              "missing-inventory",
+            );
+            appliedSolveResult = retryOutcome?.result ?? result;
+            try {
+              window.__eaDataSolver = window.__eaDataSolver || {};
+              window.__eaDataSolver.lastResult = appliedSolveResult;
+              window.__eaDataSolver.lastAppliedFilters =
+                appliedSolveResult?.stats?.appliedFilters ?? [];
+              window.__eaDataSolver.lastRequirementFlags =
+                appliedSolveResult?.stats?.requirementFlags ?? {};
+              window.__eaDataSolver.lastDebugLog =
+                appliedSolveResult?.stats?.debugLog ?? [];
+            } catch {}
+            recovered = true;
+          }
           console.log("[EA Data] Solver applied", {
             challengeId: currentChallenge?.id ?? null,
-            solutionSize: result.solutions[0]?.length ?? 0,
+            solutionSize: appliedSolveResult?.solutions?.[0]?.length ?? 0,
+            recovered,
           });
           updateLoadingOverlay("Refreshing UI...");
-          refreshSbcPanelView(view, currentChallenge, { mode: "deep" });
+          const refreshModeAfterApply =
+            (normalizeApplyMode(solverApplyMode) ?? APPLY_MODE_DEFAULT) ===
+            APPLY_MODE_EXPERIMENTAL_HYBRID
+              ? "safe"
+              : "deep";
+          refreshSbcPanelView(view, currentChallenge, {
+            mode: refreshModeAfterApply,
+          });
           try {
             dismissToast(activeProgressToast);
             activeProgressToast = null;
@@ -14087,8 +15205,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   };
                 },
               );
-              const diagnosticResult = await callSolverBridge(
-                "SOLVE",
+              const diagnosticResult = await callSolveBridge(
                 {
                   players: filteredPlayers,
                   requirements: safeRequirements,
@@ -14102,7 +15219,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   },
                   debug: debugEnabled,
                 },
-                SOLVER_BRIDGE_TIMEOUT_MS,
+                safeRequirementsNormalized,
               );
               blockedByOccupiedSlots = Array.isArray(
                 diagnosticResult?.solutions,
@@ -15969,6 +17086,56 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     };
   };
 
+  const CHEMISTRY_REQUIREMENT_TYPES = new Set([
+    "chemistry_points",
+    "all_players_chemistry_points",
+  ]);
+  const CHEMISTRY_COMPLEXITY_REQUIREMENT_TYPES = new Set([
+    "club_count",
+    "league_count",
+    "nation_count",
+    "same_club_count",
+    "same_league_count",
+    "same_nation_count",
+    "club_id",
+    "league_id",
+    "nation_id",
+  ]);
+
+  const getAdaptiveSolveTimeoutMs = (
+    requirementsNormalized = [],
+    baseTimeoutMs = SOLVER_BRIDGE_TIMEOUT_MS,
+  ) => {
+    const base = Math.max(
+      1000,
+      readNumeric(baseTimeoutMs) ?? SOLVER_BRIDGE_TIMEOUT_MS,
+    );
+    const rules = Array.isArray(requirementsNormalized)
+      ? requirementsNormalized
+      : [];
+    if (!rules.length) return base;
+
+    let hasChemistry = false;
+    let complexitySignals = 0;
+    for (const rule of rules) {
+      const type = normalizeKeyName(
+        rule?.type ?? rule?.keyNameNormalized ?? rule?.keyName ?? null,
+      );
+      if (!type) continue;
+      if (CHEMISTRY_REQUIREMENT_TYPES.has(type)) hasChemistry = true;
+      if (CHEMISTRY_COMPLEXITY_REQUIREMENT_TYPES.has(type)) {
+        complexitySignals += 1;
+      }
+    }
+
+    if (!hasChemistry) return base;
+    const extraMs =
+      complexitySignals >= 3
+        ? SOLVER_BRIDGE_COMPLEX_CHEM_TIMEOUT_EXTRA_MS
+        : SOLVER_BRIDGE_CHEM_TIMEOUT_EXTRA_MS;
+    return base + extraMs;
+  };
+
   const callSolverBridge = (
     type,
     payload,
@@ -16006,6 +17173,19 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         );
       } catch {}
     });
+
+  const callSolveBridge = (
+    payload,
+    requirementsNormalized = [],
+    timeoutMs = null,
+  ) =>
+    callSolverBridge(
+      "SOLVE",
+      payload,
+      timeoutMs == null
+        ? getAdaptiveSolveTimeoutMs(requirementsNormalized)
+        : timeoutMs,
+    );
 
   const pingSolverBridge = () => {
     const requestId = crypto.randomUUID();
@@ -16894,6 +18074,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           Boolean(challengeId) && challengeId !== lastOpenedChallengeId;
 
         if (isNewChallenge) {
+          clearPlayersSnapshotCache({
+            clearWarmLookup: true,
+            bumpRevision: true,
+          });
           lastOpenedChallengeId = challengeId;
           log("info", "[EA Data] SBC challenge opened", payload);
         }
@@ -16932,6 +18116,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         currentChallenge = null;
         lastOpenedChallengeId = null;
         currentSlotPlan = null;
+        clearPlayersSnapshotCache({
+          clearWarmLookup: true,
+          bumpRevision: true,
+        });
         log("info", "[EA Data] SBC challenge closed");
         window.postMessage({ type: "EA_SBC_CHALLENGE_CLOSED" }, "*");
         try {
@@ -17117,7 +18305,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     if (typeof originalGenerate !== "function") return false;
     const originalDestroy = proto.destroyGeneratedElements;
 
-    // FC Enhancer reference: capture UTGameRewardsView._actionBtn root from _generate.
+    // Capture UTGameRewardsView._actionBtn root from _generate.
     proto._generate = function (...args) {
       const result = originalGenerate.call(this, ...args);
       try {
@@ -18463,6 +19651,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         },
       };
     },
+    applyExperimentalSolution: async (solutionIds = [], options = {}) =>
+      applySolutionWithExperimentalHybrid(
+        options?.challenge ?? currentChallenge,
+        solutionIds,
+        options,
+      ),
     fetchAll: async (options, setIds) => {
       const { clubPlayers, storagePlayers } =
         await ensurePlayersSnapshot(options);
@@ -18486,14 +19680,34 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     ensurePlayersFetched: (options = {}, config = {}) =>
       ensurePlayersSnapshot(options, config),
     getPlayersFetchStatus: (options = {}) => getPlayersSnapshotStatus(options),
-    clearPlayersFetchCache: () => clearPlayersSnapshotCache(),
+    clearPlayersFetchCache: () =>
+      clearPlayersSnapshotCache({
+        clearWarmLookup: true,
+        bumpRevision: true,
+      }),
+    setApplyMode: (mode = APPLY_MODE_EXPERIMENTAL_HYBRID) => {
+      const normalized = normalizeApplyMode(mode);
+      if (!normalized) {
+        throw new Error(
+          `Invalid apply mode "${mode}". Valid modes: "${APPLY_MODE_DEFAULT}", "${APPLY_MODE_EXPERIMENTAL_HYBRID}"`,
+        );
+      }
+      solverApplyMode = normalized;
+      console.log("[EA Data] Apply mode set", {
+        mode: solverApplyMode,
+      });
+      return solverApplyMode;
+    },
+    getApplyMode: () => solverApplyMode,
     setAutoFetch: (enabled) => {
       autoFetchEnabled = Boolean(enabled);
       console.log(
         "[EA Data] Auto-fetch",
         autoFetchEnabled ? "enabled" : "disabled",
       );
+      return autoFetchEnabled;
     },
+    getAutoFetch: () => Boolean(autoFetchEnabled),
     setDebug: (enabled) => {
       debugEnabled = persistDebugEnabled(enabled);
       const marker = document.documentElement?.dataset?.eaSolverBridge || null;

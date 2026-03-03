@@ -1,6 +1,7 @@
 const SOLVER_BRIDGE_REQUEST = "EA_SOLVER_REQUEST";
 const SOLVER_PORT_NAME = "EA_SOLVER_PORT";
 const WORKER_RESPONSE = "SOLVER_WORKER_RESPONSE";
+const BRIDGE_INJECT_REQUEST = "EA_PAGE_BRIDGE_INJECT";
 import {
   buildSolverContext,
   solveSquad,
@@ -55,7 +56,54 @@ const handleSolverRequest = async (message, sendResponse) => {
   }
 };
 
+const handleBridgeInjectRequest = async (message, sender, sendResponse) => {
+  const path = message?.payload?.path || "page/ea-data-bridge.js";
+  const tabId = sender?.tab?.id;
+  const frameId =
+    Number.isInteger(sender?.frameId) && sender.frameId >= 0
+      ? sender.frameId
+      : 0;
+
+  try {
+    if (tabId == null) {
+      throw new Error("Missing sender tab id");
+    }
+    if (!chrome?.scripting?.executeScript) {
+      throw new Error("chrome.scripting.executeScript is unavailable");
+    }
+    await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [frameId] },
+      files: [path],
+      world: "MAIN",
+    });
+    sendResponse({
+      ok: true,
+      data: {
+        injected: true,
+        path,
+        tabId,
+        frameId,
+      },
+    });
+  } catch (error) {
+    sendResponse({
+      ok: false,
+      error: {
+        code: "PAGE_BRIDGE_INJECT_FAILED",
+        message: error?.message || String(error),
+        path,
+        tabId: tabId ?? null,
+        frameId,
+      },
+    });
+  }
+};
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === BRIDGE_INJECT_REQUEST) {
+    handleBridgeInjectRequest(message, sender, sendResponse);
+    return true;
+  }
   if (!message || message.type !== SOLVER_BRIDGE_REQUEST) return false;
   console.log("[EA Data] Background request", {
     type: message?.payload?.type ?? null,

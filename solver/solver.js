@@ -753,6 +753,22 @@ const isChemistrySatisfied = (chemistry, targets) => {
   return true;
 };
 
+const getChemistryShortfall = (chemistry, targets) => {
+  const totalTarget = toNumber(targets?.total);
+  const minTarget = toNumber(targets?.minEach);
+  const totalChem = toNumber(chemistry?.totalChem) ?? 0;
+  const minChem = toNumber(chemistry?.minChem) ?? 0;
+  const totalShort =
+    totalTarget == null ? 0 : Math.max(0, totalTarget - totalChem);
+  const minShort = minTarget == null ? 0 : Math.max(0, minTarget - minChem);
+  return {
+    totalShort,
+    minShort,
+    // Per-player minimum chemistry is usually harder to satisfy than +1 total chemistry.
+    score: totalShort + minShort * 3,
+  };
+};
+
 const buildPredicate = (rule) => {
   if (!rule) return null;
   const values = rule.values || [];
@@ -2723,24 +2739,32 @@ const improveChemistrySmart = (
   const checkTotal = totalTarget != null;
   const checkMin = minTarget != null;
 
-  const maxIterations = Math.max(10, toNumber(options?.maxIterations) ?? 60);
-  const candidateLimit = Math.max(40, toNumber(options?.maxCandidates) ?? 160);
-  const chemistryEscapeDepth = Math.max(
+  let maxIterations = Math.max(10, toNumber(options?.maxIterations) ?? 60);
+  let candidateLimit = Math.max(40, toNumber(options?.maxCandidates) ?? 160);
+  let chemistryEscapeDepth = Math.max(
     1,
     toNumber(options?.chemistryEscapeDepth) ?? 3,
   );
-  const chemistryEscapeBeamWidth = Math.max(
+  let chemistryEscapeBeamWidth = Math.max(
     8,
     toNumber(options?.chemistryEscapeBeamWidth) ?? 14,
   );
-  const chemistryEscapeCandidateLimit = Math.max(
+  let chemistryEscapeCandidateLimit = Math.max(
     20,
     toNumber(options?.chemistryEscapeCandidateLimit) ?? 70,
   );
-  const chemistryEscapePenaltySlack = Math.max(
+  let chemistryEscapePenaltySlack = Math.max(
     0,
     toNumber(options?.chemistryEscapePenaltySlack) ?? 30,
   );
+  const adaptiveNearTarget = options?.adaptiveNearTarget !== false;
+  const nearTargetShortfallThreshold = Math.max(
+    0,
+    toNumber(options?.nearTargetShortfallThreshold) ?? 2,
+  );
+  const timeBudgetMs = Math.max(0, toNumber(options?.timeBudgetMs) ?? 0);
+  const deadlineAt = timeBudgetMs > 0 ? Date.now() + timeBudgetMs : null;
+  const isExpired = () => deadlineAt != null && Date.now() >= deadlineAt;
 
   const requiredInforms = Math.max(0, toNumber(options?.requiredInforms) ?? 0);
   const avoidInforms = options?.avoidInforms !== false && requiredInforms <= 0;
@@ -2941,8 +2965,53 @@ const improveChemistrySmart = (
 
   let bestChem = computeChemistryEval(squad, slotList, n);
   let bestPenalty = computePenalty(bestChem);
+  const initialShortfall = getChemistryShortfall(bestChem, {
+    total: totalTarget,
+    minEach: minTarget,
+  });
+  if (
+    adaptiveNearTarget &&
+    initialShortfall.score > 0 &&
+    initialShortfall.score <= nearTargetShortfallThreshold
+  ) {
+    maxIterations = Math.max(
+      maxIterations,
+      toNumber(options?.nearTargetMaxIterations) ?? 110,
+    );
+    candidateLimit = Math.max(
+      candidateLimit,
+      toNumber(options?.nearTargetMaxCandidates) ?? 240,
+    );
+    chemistryEscapeDepth = Math.max(
+      chemistryEscapeDepth,
+      toNumber(options?.nearTargetEscapeDepth) ?? 5,
+    );
+    chemistryEscapeBeamWidth = Math.max(
+      chemistryEscapeBeamWidth,
+      toNumber(options?.nearTargetEscapeBeamWidth) ?? 24,
+    );
+    chemistryEscapeCandidateLimit = Math.max(
+      chemistryEscapeCandidateLimit,
+      toNumber(options?.nearTargetEscapeCandidateLimit) ?? 140,
+    );
+    chemistryEscapePenaltySlack = Math.max(
+      chemistryEscapePenaltySlack,
+      toNumber(options?.nearTargetEscapePenaltySlack) ?? 45,
+    );
+  }
 
   for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+    if (isExpired()) {
+      debugPush?.({
+        stage: "chemistry",
+        action: "budget_exhausted",
+        iteration,
+        totalChem: bestChem?.totalChem ?? null,
+        minChem: bestChem?.minChem ?? null,
+        penalty: bestPenalty,
+      });
+      break;
+    }
     if (bestPenalty <= 0 && isChemistrySatisfied(bestChem, targets)) {
       debugPush?.({
         stage: "chemistry",
@@ -2978,6 +3047,7 @@ const improveChemistrySmart = (
     let move = null;
     let moveKey = null;
     for (let outIndex = 0; outIndex < n; outIndex += 1) {
+      if (isExpired()) break;
       const outPlayer = squad[outIndex];
       if (!outPlayer) continue;
       if (hardLocked.has(outPlayer.id)) continue;
@@ -2985,6 +3055,7 @@ const improveChemistrySmart = (
       const outDef = getDefinitionKey(outPlayer);
 
       for (const inPlayer of candidates) {
+        if (isExpired()) break;
         if (!inPlayer) continue;
         if (inPlayer.id === outPlayer.id) continue;
 
@@ -3028,6 +3099,7 @@ const improveChemistrySmart = (
       // If chemistry requires crossing count thresholds, a single swap may not help.
       // Try a small two-swap search focused on the lowest-chem contributors.
       const tryDualSwap = () => {
+        if (isExpired()) return null;
         const currentChem = bestChem;
         const playerChem = new Array(n).fill(0);
         if (currentChem?.slotToPlayerIndex?.length === n) {
@@ -3060,7 +3132,9 @@ const improveChemistrySmart = (
 
         let best = null;
         for (let x = 0; x < worst.length; x += 1) {
+          if (isExpired()) return best;
           for (let y = x + 1; y < worst.length; y += 1) {
+            if (isExpired()) return best;
             const outAIndex = worst[x];
             const outBIndex = worst[y];
             const outA = squad[outAIndex];
@@ -3071,7 +3145,9 @@ const improveChemistrySmart = (
             const outBDef = getDefinitionKey(outB);
 
             for (let a = 0; a < dualCandidates.length; a += 1) {
+              if (isExpired()) return best;
               for (let b = a + 1; b < dualCandidates.length; b += 1) {
+                if (isExpired()) return best;
                 const inA = dualCandidates[a];
                 const inB = dualCandidates[b];
                 if (!inA || !inB) continue;
@@ -3165,6 +3241,7 @@ const improveChemistrySmart = (
       }
 
       const tryChemistryEscape = () => {
+        if (isExpired()) return null;
         const baseCandidates = buildCandidatePool(squad, bestChem)
           .slice(0, chemistryEscapeCandidateLimit)
           .filter(Boolean);
@@ -3203,8 +3280,10 @@ const improveChemistrySmart = (
         let bestFallback = null;
 
         for (let depth = 0; depth < chemistryEscapeDepth; depth += 1) {
+          if (isExpired()) break;
           const nextBeam = [];
           for (const node of beam) {
+            if (isExpired()) break;
             const nodeSquad = node.squad;
             const usedIds = new Set(
               nodeSquad
@@ -3221,6 +3300,7 @@ const improveChemistrySmart = (
             );
 
             for (let outIndex = 0; outIndex < n; outIndex += 1) {
+              if (isExpired()) break;
               const outPlayer = nodeSquad[outIndex];
               if (!outPlayer) continue;
               if (hardLocked.has(outPlayer.id)) continue;
@@ -3228,6 +3308,7 @@ const improveChemistrySmart = (
               const outDef = getDefinitionKey(outPlayer);
 
               for (const inPlayer of baseCandidates) {
+                if (isExpired()) break;
                 if (!inPlayer) continue;
                 if (inPlayer.id === outPlayer.id) continue;
                 if (usedIds.has(inPlayer.id) && inPlayer.id !== outPlayer.id)
@@ -4277,6 +4358,47 @@ export const solveSquad = (context) => {
     } else {
       chemistry = computeChemistryEval(squad, slotsForChemistry, squadSize);
       if (!isChemistrySatisfied(chemistry, chemistryTargets)) {
+        const baseChemMaxIterations = Math.max(
+          10,
+          toNumber(context?.optimize?.chemMaxIterations) ?? 60,
+        );
+        const baseChemMaxCandidates = Math.max(
+          40,
+          toNumber(context?.optimize?.chemMaxCandidates) ?? 160,
+        );
+        const baseChemEscapeDepth = Math.max(
+          1,
+          toNumber(context?.optimize?.chemEscapeDepth) ?? 3,
+        );
+        const baseChemEscapeBeamWidth = Math.max(
+          8,
+          toNumber(context?.optimize?.chemEscapeBeamWidth) ?? 14,
+        );
+        const baseChemEscapeCandidateLimit = Math.max(
+          20,
+          toNumber(context?.optimize?.chemEscapeCandidateLimit) ?? 70,
+        );
+        const baseChemEscapePenaltySlack = Math.max(
+          0,
+          toNumber(context?.optimize?.chemEscapePenaltySlack) ?? 30,
+        );
+        const baseChemOptions = {
+          maxIterations: baseChemMaxIterations,
+          maxCandidates: baseChemMaxCandidates,
+          chemistryEscapeDepth: baseChemEscapeDepth,
+          chemistryEscapeBeamWidth: baseChemEscapeBeamWidth,
+          chemistryEscapeCandidateLimit: baseChemEscapeCandidateLimit,
+          chemistryEscapePenaltySlack: baseChemEscapePenaltySlack,
+          ratingTarget: ratingRequirement?.target ?? null,
+          pivot: context?.optimize?.preservePivot ?? null,
+          requiredInforms: informBounds?.min ?? 0,
+          avoidInforms: excludeSpecial
+            ? context?.optimize?.avoidInforms !== false
+            : false,
+          preferLowerExcessInforms: preferLowerExcessInformsDuringSolve,
+          timeBudgetMs: context?.optimize?.chemTimeBudgetMs ?? null,
+        };
+
         improveChemistrySmart(
           squad,
           pool,
@@ -4286,19 +4408,91 @@ export const solveSquad = (context) => {
           chemistryTargets,
           hardLockedIds,
           debugPush,
-          {
-            maxIterations: context?.optimize?.chemMaxIterations ?? 60,
-            maxCandidates: context?.optimize?.chemMaxCandidates ?? 160,
-            ratingTarget: ratingRequirement?.target ?? null,
-            pivot: context?.optimize?.preservePivot ?? null,
-            requiredInforms: informBounds?.min ?? 0,
-            avoidInforms: excludeSpecial
-              ? context?.optimize?.avoidInforms !== false
-              : false,
-            preferLowerExcessInforms: preferLowerExcessInformsDuringSolve,
-          },
+          baseChemOptions,
         );
         chemistry = computeChemistryEval(squad, slotsForChemistry, squadSize);
+
+        if (!isChemistrySatisfied(chemistry, chemistryTargets)) {
+          const shortfall = getChemistryShortfall(chemistry, chemistryTargets);
+          const extendedShortfallThreshold = Math.max(
+            1,
+            toNumber(context?.optimize?.chemExtendedShortfallThreshold) ?? 2,
+          );
+          if (
+            shortfall.score > 0 &&
+            shortfall.score <= extendedShortfallThreshold
+          ) {
+            debugPush?.({
+              stage: "chemistry",
+              action: "retry_extended",
+              shortfall: shortfall.score,
+              totalShort: shortfall.totalShort,
+              minShort: shortfall.minShort,
+              totalChem: chemistry?.totalChem ?? null,
+              minChem: chemistry?.minChem ?? null,
+            });
+
+            improveChemistrySmart(
+              squad,
+              pool,
+              rules,
+              squadSize,
+              slotsForChemistry,
+              chemistryTargets,
+              hardLockedIds,
+              debugPush,
+              {
+                ...baseChemOptions,
+                maxIterations: Math.max(
+                  baseChemMaxIterations,
+                  toNumber(context?.optimize?.chemExtendedMaxIterations) ??
+                    120,
+                ),
+                maxCandidates: Math.max(
+                  baseChemMaxCandidates,
+                  toNumber(context?.optimize?.chemExtendedMaxCandidates) ??
+                    280,
+                ),
+                chemistryEscapeDepth: Math.max(
+                  baseChemEscapeDepth,
+                  toNumber(context?.optimize?.chemExtendedEscapeDepth) ?? 5,
+                ),
+                chemistryEscapeBeamWidth: Math.max(
+                  baseChemEscapeBeamWidth,
+                  toNumber(context?.optimize?.chemExtendedEscapeBeamWidth) ??
+                    24,
+                ),
+                chemistryEscapeCandidateLimit: Math.max(
+                  baseChemEscapeCandidateLimit,
+                  toNumber(
+                    context?.optimize?.chemExtendedEscapeCandidateLimit,
+                  ) ?? 150,
+                ),
+                chemistryEscapePenaltySlack: Math.max(
+                  baseChemEscapePenaltySlack,
+                  toNumber(context?.optimize?.chemExtendedEscapePenaltySlack) ??
+                    50,
+                ),
+                positionCoveragePerSlot: Math.max(
+                  8,
+                  toNumber(context?.optimize?.chemExtendedPositionCoverage) ??
+                    14,
+                ),
+                adaptiveNearTarget:
+                  context?.optimize?.chemAdaptiveNearTarget !== false,
+                nearTargetShortfallThreshold: Math.max(
+                  1,
+                  toNumber(context?.optimize?.chemNearTargetShortfall) ?? 2,
+                ),
+                timeBudgetMs: Math.max(
+                  toNumber(baseChemOptions.timeBudgetMs) ?? 0,
+                  toNumber(context?.optimize?.chemExtendedTimeBudgetMs) ?? 3000,
+                ),
+              },
+            );
+            chemistry = computeChemistryEval(squad, slotsForChemistry, squadSize);
+          }
+        }
       }
     }
     timingsMs.chemistry = Date.now() - chemistryStart;
@@ -4317,7 +4511,7 @@ export const solveSquad = (context) => {
 
   const solved = failingRequirements.length === 0;
 
-  // Chemistry can be extremely sensitive to which clubs are in the squad when club_count is bounded.
+  // Chemistry can be extremely sensitive to which clubs are in the squad.
   // If our local chemistry swap pass gets stuck, do a small "club set" search by swapping one club
   // in/out and re-running the solver on a restricted player pool. This helps escape local minima.
   if (
@@ -4332,18 +4526,35 @@ export const solveSquad = (context) => {
       "club_count",
       squadSize,
     );
-    const clubMax =
+    const finiteClubMax =
       Number.isFinite(clubBounds.max) && clubBounds.max < Infinity
         ? clubBounds.max
         : null;
-    const clubSearchMax = Math.max(
+    const baseClubs = new Set(
+      squad.map((player) => player?.teamId).filter((v) => v != null),
+    );
+    const baseClubCount = baseClubs.size;
+    const openSearchMaxClubs = Math.max(
+      2,
+      toNumber(context?.optimize?.chemClubSearchOpenMaxClubs) ?? 8,
+    );
+    const openSearchMaxExtraClubs = Math.max(
       0,
-      toNumber(context?.optimize?.chemClubSearchMaxClubs) ?? 6,
+      toNumber(context?.optimize?.chemClubSearchMaxExtraClubs) ?? 1,
+    );
+    const openClubCap = Math.min(
+      Math.max(baseClubCount, openSearchMaxClubs),
+      baseClubCount + openSearchMaxExtraClubs,
+    );
+    const clubSetCap = finiteClubMax ?? openClubCap;
+    const clubSearchMax = Math.max(
+      2,
+      toNumber(context?.optimize?.chemClubSearchMaxClubs) ?? 8,
     );
     const canSearch =
-      clubMax != null &&
-      clubMax >= 2 &&
-      clubMax <= clubSearchMax &&
+      baseClubCount >= 1 &&
+      clubSetCap >= 2 &&
+      clubSetCap <= clubSearchMax &&
       Array.isArray(slotsForChemistry) &&
       slotsForChemistry.length >= squadSize;
 
@@ -4387,10 +4598,7 @@ export const solveSquad = (context) => {
       const baseShortfall = getChemShortfall({
         stats: { chemistry: { totalChem: chemistry?.totalChem ?? 0 } },
       });
-      const baseClubs = new Set(
-        squad.map((player) => player?.teamId).filter((v) => v != null),
-      );
-      if (baseClubs.size && baseClubs.size <= clubMax) {
+      if (baseClubs.size && baseClubs.size <= clubSetCap) {
         const maxSteps = Math.max(
           1,
           toNumber(context?.optimize?.chemClubSearchSteps) ?? 8,
@@ -4430,9 +4638,17 @@ export const solveSquad = (context) => {
           let bestNeighbor = null;
 
           const outClubs = Array.from(currentClubs);
-          const allowAdd = currentClubs.size < clubMax;
+          const allowAdd = currentClubs.size < clubSetCap;
 
           const nextClubSets = [];
+          const nextClubSetKeys = new Set();
+          const pushNextClubSet = (set) => {
+            if (!(set instanceof Set)) return;
+            const key = Array.from(set).sort((a, b) => a - b).join(",");
+            if (!key || nextClubSetKeys.has(key)) return;
+            nextClubSetKeys.add(key);
+            nextClubSets.push(set);
+          };
 
           // Replacement neighbors.
           for (const outClub of outClubs) {
@@ -4441,8 +4657,8 @@ export const solveSquad = (context) => {
               const next = new Set(currentClubs);
               next.delete(outClub);
               next.add(inClub);
-              if (next.size > clubMax) continue;
-              nextClubSets.push(next);
+              if (next.size > clubSetCap) continue;
+              pushNextClubSet(next);
             }
           }
 
@@ -4452,8 +4668,8 @@ export const solveSquad = (context) => {
               if (currentClubs.has(inClub)) continue;
               const next = new Set(currentClubs);
               next.add(inClub);
-              if (next.size > clubMax) continue;
-              nextClubSets.push(next);
+              if (next.size > clubSetCap) continue;
+              pushNextClubSet(next);
             }
           }
 
