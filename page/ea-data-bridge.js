@@ -4350,8 +4350,9 @@
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
 }
 .ea-data-sequence-entry-button::before {
-  content: '\u26A1';
-  font-size: 14px;
+  content: '\u21C9';
+  font-size: 15px;
+  line-height: 1;
 }
 .ea-data-sequence-entry-button:hover {
   border-color: rgba(255, 200, 80, 0.65);
@@ -4384,7 +4385,7 @@
   }
 }
 
-/* ── Modal Shell ── */
+/* -- Modal Shell -- */
 .ea-data-sequence-modal {
   width: min(1180px, 94vw);
   max-height: min(92vh, 980px);
@@ -4437,7 +4438,7 @@
   justify-content: flex-end;
 }
 
-/* ── Badges ── */
+/* -- Badges -- */
 .ea-data-sequence-badge {
   min-height: 28px;
   padding: 0 11px;
@@ -4459,14 +4460,14 @@
   color: rgba(255, 200, 100, 0.9);
 }
 
-/* ── Body Layout ── */
+/* -- Body Layout -- */
 .ea-data-sequence-body {
   min-height: 0;
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
 }
 
-/* ── Sidebar ── */
+/* -- Sidebar -- */
 .ea-data-sequence-sidebar {
   min-height: 0;
   padding: 16px;
@@ -4498,6 +4499,11 @@
   display: flex;
   gap: 6px;
 }
+.ea-data-sequence-sidebar-footer {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
 .ea-data-sequence-sidebar-btn {
   flex: 1;
   min-height: 34px;
@@ -4518,10 +4524,21 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+.ea-data-sequence-sidebar-btn--close {
+  width: 100%;
+  border-color: rgba(255, 120, 120, 0.22);
+  background: rgba(120, 28, 28, 0.14);
+  color: rgba(255, 205, 205, 0.9);
+}
+.ea-data-sequence-sidebar-btn--close:hover {
+  background: rgba(150, 36, 36, 0.22);
+  border-color: rgba(255, 130, 130, 0.34);
+}
 
-/* ── Plan Cards ── */
+/* -- Plan Cards -- */
 .ea-data-sequence-plan-list {
   min-height: 0;
+  flex: 1;
   overflow: auto;
   display: flex;
   flex-direction: column;
@@ -4560,26 +4577,43 @@
   flex-shrink: 0;
   width: 22px;
   height: 22px;
-  border-radius: 5px;
-  border: 1px solid rgba(255, 100, 100, 0.15);
-  background: rgba(200, 50, 50, 0.08);
-  color: rgba(255, 130, 130, 0.65);
-  font-size: 13px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 95, 95, 0.2);
+  background:
+    linear-gradient(180deg, rgba(178, 48, 48, 0.9), rgba(132, 28, 28, 0.94));
+  color: rgba(255, 239, 239, 0.96);
+  font-size: 12.5px;
   font-weight: 900;
   line-height: 1;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 8px 16px rgba(70, 10, 10, 0.18);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transition: opacity 150ms ease, background 150ms ease, color 150ms ease;
+  transition:
+    opacity 150ms ease,
+    transform 150ms ease,
+    filter 150ms ease,
+    box-shadow 150ms ease;
+  transform: scale(0.92);
 }
-.ea-data-sequence-plan-card:hover .ea-data-sequence-plan-delete-btn {
+.ea-data-sequence-plan-card:hover .ea-data-sequence-plan-delete-btn,
+.ea-data-sequence-plan-card.is-active .ea-data-sequence-plan-delete-btn {
   opacity: 1;
+  transform: scale(1);
 }
 .ea-data-sequence-plan-delete-btn:hover {
-  background: rgba(200, 50, 50, 0.2);
-  color: rgba(255, 140, 140, 0.9);
+  filter: brightness(1.05);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 10px 20px rgba(90, 14, 14, 0.24);
+}
+.ea-data-sequence-plan-delete-btn:active {
+  transform: scale(0.96);
 }
 .ea-data-sequence-plan-name {
   color: rgba(240, 240, 240, 0.88);
@@ -4597,7 +4631,7 @@
   font-weight: 700;
 }
 
-/* ── Main Area ── */
+/* -- Main Area -- */
 .ea-data-sequence-main {
   min-height: 0;
   display: flex;
@@ -4605,7 +4639,7 @@
   overflow: hidden;
 }
 
-/* ── Tab Bar ── */
+/* -- Tab Bar -- */
 .ea-data-sequence-tabs {
   display: flex;
   gap: 0;
@@ -4661,7 +4695,7 @@
   color: rgba(255, 200, 100, 0.9);
 }
 
-/* ── Status Bar ── */
+/* -- Status Bar -- */
 .ea-data-sequence-status-bar {
   padding: 8px 20px;
   display: flex;
@@ -4677,7 +4711,14 @@
   font-weight: 700;
 }
 
-/* ── Tab Panels ── */
+/* -- Tab Panels -- */
+.ea-data-sequence-panels {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
 .ea-data-sequence-tab-panel {
   display: none;
   min-height: 0;
@@ -4692,9 +4733,42 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+  transition:
+    opacity 220ms ease,
+    transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform, filter;
+}
+.ea-data-sequence-tab-panel.is-entering .ea-data-sequence-tab-panel-inner {
+  animation: ea-data-sequence-panel-enter 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.ea-data-sequence-tab-panel.is-leaving .ea-data-sequence-tab-panel-inner {
+  opacity: 0;
+  transform: translateY(-10px) scale(0.992);
+  filter: blur(4px);
+}
+@keyframes ea-data-sequence-panel-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.994);
+    filter: blur(5px);
+  }
+  55% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0.6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
 }
 
-/* ── Footer ── */
+/* -- Footer -- */
 .ea-data-sequence-footer {
   display: flex;
   align-items: center;
@@ -4713,7 +4787,7 @@
   flex-wrap: wrap;
 }
 
-/* ── Surface Cards ── */
+/* -- Surface Cards -- */
 .ea-data-sequence-surface {
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -4741,7 +4815,7 @@
   line-height: 1.4;
 }
 
-/* ── Form Fields ── */
+/* -- Form Fields -- */
 .ea-data-sequence-plan-meta-grid {
   padding: 14px 16px 16px;
   display: grid;
@@ -4817,7 +4891,7 @@
   cursor: not-allowed;
 }
 
-/* ── Step Cards (Accordion) ── */
+/* -- Step Cards (Accordion) -- */
 .ea-data-sequence-step-list {
   display: flex;
   flex-direction: column;
@@ -4828,7 +4902,13 @@
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.015);
   overflow: hidden;
-  transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease,
+    opacity 180ms ease,
+    filter 180ms ease,
+    transform 180ms ease;
 }
 .ea-data-sequence-step-card.is-expanded {
   border-color: rgba(255, 180, 60, 0.2);
@@ -4841,6 +4921,22 @@
 }
 .ea-data-sequence-step-card.is-disabled {
   opacity: 0.45;
+  filter: saturate(0.72);
+}
+.ea-data-sequence-step-card.is-move-up {
+  animation: ea-data-sequence-step-move-up 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ea-data-sequence-step-card.is-move-down {
+  animation: ea-data-sequence-step-move-down 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ea-data-sequence-step-card.is-enable-toggle {
+  animation: ea-data-sequence-step-enable 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ea-data-sequence-step-card.is-disable-toggle {
+  animation: ea-data-sequence-step-disable 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ea-data-sequence-step-card.is-new {
+  animation: ea-data-sequence-step-new 520ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .ea-data-sequence-step-summary {
   display: flex;
@@ -4871,7 +4967,7 @@
   justify-content: center;
   color: rgba(200, 200, 210, 0.35);
   font-size: 10px;
-  transition: transform 200ms ease, color 200ms ease;
+  transition: transform 380ms cubic-bezier(0.22, 1, 0.36, 1), color 260ms ease;
 }
 .ea-data-sequence-step-card.is-expanded .ea-data-sequence-step-chevron {
   transform: rotate(90deg);
@@ -4908,7 +5004,7 @@
   font-size: 10px;
 }
 
-/* ── Step Status Badges ── */
+/* -- Step Status Badges -- */
 .ea-data-sequence-step-badge {
   min-height: 24px;
   padding: 0 9px;
@@ -4947,6 +5043,11 @@
   background: rgba(140, 70, 18, 0.14);
   color: rgba(255, 190, 120, 0.92);
 }
+.ea-data-sequence-step-badge[data-status="waiting"] {
+  border-color: rgba(255, 208, 96, 0.24);
+  background: rgba(140, 100, 20, 0.1);
+  color: rgba(255, 216, 120, 0.9);
+}
 .ea-data-sequence-step-badge[data-status="running"],
 .ea-data-sequence-step-badge[data-status="resolving"],
 .ea-data-sequence-step-badge[data-status="solving"],
@@ -4958,16 +5059,40 @@
   color: rgba(130, 200, 255, 0.9);
 }
 
-/* ── Step Detail (expanded) ── */
+/* -- Step Detail (expanded) -- */
 .ea-data-sequence-step-detail {
-  display: none;
-  padding: 2px 14px 14px;
-  flex-direction: column;
-  gap: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  padding: 0 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0);
+  transition:
+    grid-template-rows 480ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 320ms ease,
+    padding 480ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 260ms ease;
 }
 .ea-data-sequence-step-card.is-expanded .ea-data-sequence-step-detail {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  padding: 2px 14px 14px;
+  border-top-color: rgba(255, 255, 255, 0.04);
+}
+.ea-data-sequence-step-detail-body {
+  min-height: 0;
+  overflow: hidden;
   display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transform: translateY(-8px);
+  filter: blur(5px);
+  transition:
+    transform 460ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ea-data-sequence-step-card.is-expanded .ea-data-sequence-step-detail-body {
+  transform: translateY(0);
+  filter: blur(0);
 }
 .ea-data-sequence-step-grid {
   display: grid;
@@ -4977,6 +5102,9 @@
 .ea-data-sequence-step-grid--triple {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+.ea-data-sequence-step-grid--triple .ea-data-sequence-label {
+  text-align: center;
+}
 .ea-data-sequence-step-target-copy {
   color: rgba(200, 200, 210, 0.4);
   font-size: 11.5px;
@@ -4985,13 +5113,16 @@
 .ea-data-sequence-step-target-copy--invalid {
   color: rgba(255, 170, 120, 0.92);
 }
+.ea-data-sequence-step-target-copy--notice {
+  color: rgba(255, 216, 140, 0.88);
+}
 .ea-data-sequence-range-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-/* ── Custom Checkboxes / Toggle Grid ── */
+/* -- Custom Checkboxes / Toggle Grid -- */
 .ea-data-sequence-toggle-list {
   display: flex;
   flex-direction: column;
@@ -5076,6 +5207,7 @@
   gap: 7px;
   padding: 0 2px;
   cursor: pointer;
+  transition: opacity 260ms ease, transform 260ms ease;
 }
 .ea-data-sequence-step-enabled-copy {
   color: rgba(200, 200, 210, 0.55);
@@ -5091,13 +5223,90 @@
 .ea-data-sequence-step-enabled .ea-data-toggle-switch input:checked + .ea-data-toggle-slider:before {
   background-color: #fff7e5;
 }
+@keyframes ea-data-sequence-step-move-up {
+  from {
+    transform: translateY(12px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes ea-data-sequence-step-move-down {
+  from {
+    transform: translateY(-12px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes ea-data-sequence-step-new {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes ea-data-sequence-step-enable {
+  from {
+    opacity: 0.6;
+    filter: saturate(0.7);
+  }
+  to {
+    opacity: 1;
+    filter: saturate(1);
+  }
+}
+@keyframes ea-data-sequence-step-disable {
+  from {
+    opacity: 1;
+    filter: saturate(1);
+  }
+  to {
+    opacity: 0.45;
+    filter: saturate(0.72);
+  }
+}
 
-/* ── Runtime Dashboard ── */
+/* -- Runtime Dashboard -- */
 .ea-data-sequence-runtime {
   padding: 14px 16px 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.ea-data-sequence-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ea-data-sequence-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: rgba(200, 200, 210, 0.55);
+  font-size: 11px;
+  font-weight: 700;
+}
+.ea-data-sequence-progress-track {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.04);
+}
+.ea-data-sequence-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--progress-pct, 0%);
+  border-radius: inherit;
+  background:
+    linear-gradient(90deg, rgba(255, 177, 61, 0.92), rgba(255, 120, 32, 0.88));
+  box-shadow: 0 0 18px rgba(255, 166, 52, 0.28);
+  transition: width 180ms ease;
 }
 .ea-data-sequence-run-badge {
   min-height: 26px;
@@ -5186,7 +5395,7 @@
   text-align: right;
 }
 
-/* ── Empty State ── */
+/* -- Empty State -- */
 .ea-data-sequence-empty {
   padding: 20px 16px;
   border-radius: 10px;
@@ -5197,7 +5406,7 @@
   text-align: center;
 }
 
-/* ── Responsive ── */
+/* -- Responsive -- */
 @media (max-width: 1100px) {
   .ea-data-sequence-modal {
     width: min(1020px, 96vw);
@@ -15774,12 +15983,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         <div class="ea-data-sequence-header">
           <div class="ea-data-sequence-title-wrap">
             <div class="ea-data-sequence-title" id="ea-data-sequence-title">Sequence Solver</div>
-            <div class="ea-data-sequence-subtitle">Build and execute cross-challenge SBC runs with per-step solver settings.</div>
+            <div class="ea-data-sequence-subtitle">Choose several SBCs, save the order, and solve them all in one run.</div>
           </div>
           <div class="ea-data-sequence-header-meta">
             <div class="ea-data-sequence-badge ea-data-sequence-badge--accent" id="ea-data-sequence-plan-badge">Saved</div>
             <div class="ea-data-sequence-badge" id="ea-data-sequence-run-badge">Idle</div>
-            <button type="button" class="ea-data-settings-close" aria-label="Close sequence solver" data-action="close">\u00D7</button>
           </div>
         </div>
         <div class="ea-data-sequence-body">
@@ -15792,6 +16000,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               <button type="button" class="ea-data-sequence-sidebar-btn" id="ea-data-sequence-new-btn">+ New Plan</button>
             </div>
             <div class="ea-data-sequence-plan-list" id="ea-data-sequence-plan-list"></div>
+            <div class="ea-data-sequence-sidebar-footer">
+              <button type="button" class="ea-data-sequence-sidebar-btn ea-data-sequence-sidebar-btn--close" id="ea-data-sequence-close-btn">Close Planner</button>
+            </div>
           </aside>
           <div class="ea-data-sequence-main">
             <div class="ea-data-sequence-tabs">
@@ -15802,14 +16013,16 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             <div class="ea-data-sequence-status-bar">
               <div class="ea-data-sequence-status-text" id="ea-data-sequence-toolbar-status">Preparing planner...</div>
             </div>
-            <div class="ea-data-sequence-tab-panel is-active" data-tab-panel="steps">
-              <div class="ea-data-sequence-tab-panel-inner" id="ea-data-sequence-steps-panel"></div>
-            </div>
-            <div class="ea-data-sequence-tab-panel" data-tab-panel="settings">
-              <div class="ea-data-sequence-tab-panel-inner" id="ea-data-sequence-settings-panel"></div>
-            </div>
-            <div class="ea-data-sequence-tab-panel" data-tab-panel="execution">
-              <div class="ea-data-sequence-tab-panel-inner" id="ea-data-sequence-execution-panel"></div>
+            <div class="ea-data-sequence-panels">
+              <div class="ea-data-sequence-tab-panel is-active" data-tab-panel="steps">
+                <div class="ea-data-sequence-tab-panel-inner" id="ea-data-sequence-steps-panel"></div>
+              </div>
+              <div class="ea-data-sequence-tab-panel" data-tab-panel="settings">
+                <div class="ea-data-sequence-tab-panel-inner" id="ea-data-sequence-settings-panel"></div>
+              </div>
+              <div class="ea-data-sequence-tab-panel" data-tab-panel="execution">
+                <div class="ea-data-sequence-tab-panel-inner" id="ea-data-sequence-execution-panel"></div>
+              </div>
             </div>
             <div class="ea-data-sequence-footer">
               <div class="ea-data-sequence-footer-group">
@@ -15831,8 +16044,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 
 
     const modal = overlay.querySelector(".ea-data-sequence-modal");
-    const closeBtn = overlay.querySelector('[data-action="close"]');
     const newBtn = overlay.querySelector("#ea-data-sequence-new-btn");
+    const closeBtn = overlay.querySelector("#ea-data-sequence-close-btn");
     const saveBtn = overlay.querySelector("#ea-data-sequence-save-btn");
     const startBtn = overlay.querySelector("#ea-data-sequence-start-btn");
     const stopBtn = overlay.querySelector("#ea-data-sequence-stop-btn");
@@ -15894,6 +16107,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       if (text === "failed") return "failed";
       if (text === "stopped") return "stopped";
       if (text === "invalid") return "invalid";
+      if (text === "waiting") return "waiting";
       if (text === "running") return "running";
       if (
         text === "resolving" ||
@@ -15932,6 +16146,35 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         plans[0] ??
         null
       );
+    };
+
+    const ensureExpandedStepForPlan = (plan = null, { preferredStepId = null } = {}) => {
+      const state = sequenceSolveOverlayState ?? null;
+      const activePlan = plan ?? getActivePlan();
+      if (!state || !activePlan) return null;
+      const steps = Array.isArray(activePlan?.steps) ? activePlan.steps : [];
+      if (!steps.length) {
+        state.expandedStepId = null;
+        return null;
+      }
+      const preferredKey = sanitizeDisplayText(preferredStepId);
+      if (
+        preferredKey &&
+        steps.some((step) => String(step?.id) === String(preferredKey))
+      ) {
+        state.expandedStepId = preferredKey;
+        return preferredKey;
+      }
+      const currentKey = sanitizeDisplayText(state.expandedStepId);
+      if (currentKey && steps.some((step) => String(step?.id) === String(currentKey))) {
+        return currentKey;
+      }
+      const fallbackStep =
+        steps.find((step) => step?.enabled !== false) ??
+        steps[0] ??
+        null;
+      state.expandedStepId = fallbackStep?.id ?? null;
+      return state.expandedStepId;
     };
 
     const getStepRunRecord = (stepId) => {
@@ -16020,11 +16263,22 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       );
     };
 
-    const getCompatibleSetsForKind = (kind) => {
+    const getCompatibleSetsForKind = (kind, { includeSetId = null } = {}) => {
       const requiredShape = getSequenceRequiredSetShapeForKind(kind);
-      return getSequenceDiscoverySets().filter(
+      const compatibleSets = getSequenceDiscoverySets().filter(
         (entry) => getSequenceSetShape(entry?.setShape) === requiredShape,
       );
+      const preservedSet = getSetEntryById(includeSetId);
+      if (
+        preservedSet &&
+        getSequenceSetShape(preservedSet?.setShape) === requiredShape &&
+        !compatibleSets.some(
+          (entry) => readNumeric(entry?.id) === readNumeric(preservedSet?.id),
+        )
+      ) {
+        return [preservedSet].concat(compatibleSets);
+      }
+      return compatibleSets;
     };
 
     const validateSequenceStep = (step) => {
@@ -16043,16 +16297,6 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           valid: false,
           code: "STEP_SET_STALE",
           reason: "Selected SBC set is no longer available. Reselect a compatible set.",
-        };
-      }
-      if (setEntry?.isCompletable === false) {
-        return {
-          valid: false,
-          code: "STEP_SET_UNAVAILABLE",
-          reason:
-            setEntry?.noRepeatsLeft || setEntry?.setComplete
-              ? "Selected SBC set is already complete or has no repeats remaining. Reselect a completable set."
-              : "Selected SBC set is currently not completable. Reselect a different set.",
         };
       }
       const requiredShape = getSequenceRequiredSetShapeForKind(target?.kind);
@@ -16076,10 +16320,17 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               : "Entire Set requires a multi-squad SBC set. Reselect a compatible set.",
         };
       }
+      const availableNow = setEntry?.isCompletable !== false;
       return {
         valid: true,
-        code: null,
+        code: availableNow ? null : "STEP_SET_WAITING",
         reason: null,
+        notice: availableNow
+          ? null
+          : setEntry?.noRepeatsLeft || setEntry?.setComplete
+            ? "Selected SBC set has no open work right now. The step stays saved and will be skipped until the set becomes available again."
+            : "Selected SBC set is temporarily unavailable right now. The step stays saved and will be skipped until it becomes available again.",
+        availableNow,
       };
     };
 
@@ -16302,17 +16553,83 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     };
 
     const switchTab = (tabKey) => {
+      const state = sequenceSolveOverlayState;
+      const nextPanel = Array.from(tabPanels).find(
+        (panel) => panel.getAttribute("data-tab-panel") === tabKey,
+      );
+      if (!nextPanel) return;
+      const clearTabTimers = () => {
+        const timers = Array.isArray(state?.tabTransitionTimers)
+          ? state.tabTransitionTimers
+          : [];
+        timers.forEach((timerId) => {
+          try {
+            clearTimeout(timerId);
+          } catch {}
+        });
+        if (state) {
+          state.tabTransitionTimers = [];
+        }
+      };
+      if (Array.isArray(state?.tabTransitionTimers) && state.tabTransitionTimers.length) {
+        clearTabTimers();
+        tabPanels.forEach((panel) => {
+          const key = panel.getAttribute("data-tab-panel");
+          panel.classList.remove("is-entering", "is-leaving");
+          panel.classList.toggle("is-active", key === state?.activeTab);
+        });
+      }
       tabButtons.forEach((btn) => {
         const key = btn.getAttribute("data-tab");
         btn.classList.toggle("is-active", key === tabKey);
       });
-      tabPanels.forEach((panel) => {
-        const key = panel.getAttribute("data-tab-panel");
-        panel.classList.toggle("is-active", key === tabKey);
-      });
-      if (sequenceSolveOverlayState) {
-        sequenceSolveOverlayState.activeTab = tabKey;
+      const currentPanel = Array.from(tabPanels).find((panel) =>
+        panel.classList.contains("is-active"),
+      );
+      if (!currentPanel || currentPanel === nextPanel) {
+        tabPanels.forEach((panel) => {
+          const key = panel.getAttribute("data-tab-panel");
+          panel.classList.remove("is-entering", "is-leaving");
+          panel.classList.toggle("is-active", key === tabKey);
+        });
+        if (state) {
+          state.activeTab = tabKey;
+          state.tabTransitionTimers = [];
+        }
+        nextPanel.classList.add("is-entering");
+        const settleTimer = setTimeout(() => {
+          nextPanel.classList.remove("is-entering");
+          if (sequenceSolveOverlayState) {
+            sequenceSolveOverlayState.tabTransitionTimers = [];
+          }
+        }, 540);
+        if (state) {
+          state.tabTransitionTimers = [settleTimer];
+        }
+        return;
       }
+      if (state) {
+        state.activeTab = tabKey;
+      }
+      currentPanel.classList.add("is-leaving");
+      const switchTimer = setTimeout(() => {
+        tabPanels.forEach((panel) => {
+          const key = panel.getAttribute("data-tab-panel");
+          panel.classList.remove("is-entering", "is-leaving");
+          panel.classList.toggle("is-active", key === tabKey);
+        });
+        nextPanel.classList.add("is-entering");
+        const settleTimer = setTimeout(() => {
+          nextPanel.classList.remove("is-entering");
+          if (sequenceSolveOverlayState) {
+            sequenceSolveOverlayState.tabTransitionTimers = [];
+          }
+        }, 540);
+        if (sequenceSolveOverlayState) {
+          sequenceSolveOverlayState.tabTransitionTimers = [settleTimer];
+        }
+      }, 180);
+      state.tabTransitionTimers = [switchTimer];
     };
 
     const renderPlanList = () => {
@@ -16384,12 +16701,57 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         1,
       );
       const currentStepLabel =
-        sanitizeDisplayText(runState?.currentStepLabel) ?? "Waiting for run start";
+        sanitizeDisplayText(runState?.currentStepLabel) ??
+        "Waiting for run start";
       const progressCopy = [
         `Plan pass ${Math.max(0, planPass)}/${planLoopCount}`,
         `Step loop ${Math.max(0, stepLoopPass)}/${stepLoopCount}`,
         `Current step: ${currentStepLabel}`,
       ].join(" • ");
+      const processedChallenges = getRunProcessedChallengeCount(runState);
+      const plannedChallenges = Math.max(
+        processedChallenges,
+        Math.max(0, Math.floor(readNumeric(runState?.plannedChallenges) ?? 0)),
+      );
+      const rawProgressPct =
+        plannedChallenges > 0
+          ? Math.max(
+              0,
+              Math.min(
+                100,
+                Math.round((processedChallenges / plannedChallenges) * 100),
+              ),
+            )
+          : 0;
+      const progressPct =
+        runBadgeStatus === "completed" && plannedChallenges > 0
+          ? 100
+          : rawProgressPct;
+      const usedSummary =
+        runState?.usedSummary && typeof runState.usedSummary === "object"
+          ? runState.usedSummary
+          : createEmptyRunUsedSummary();
+      const usedRatingEntries = Object.entries(
+        usedSummary?.ratings && typeof usedSummary.ratings === "object"
+          ? usedSummary.ratings
+          : {},
+      )
+        .map(([rating, count]) => [
+          readNumeric(rating),
+          readNumeric(count) ?? 0,
+        ])
+        .filter(([rating, count]) => rating != null && count > 0)
+        .sort((a, b) => b[0] - a[0]);
+      const usedRatingPills = usedRatingEntries.length
+        ? usedRatingEntries
+            .map(
+              ([rating, count]) =>
+                `<span class="ea-data-pill ea-data-pill--rating">${escapeHtml(
+                  `${rating}\u00D7${count}`,
+                )}</span>`,
+            )
+            .join("")
+        : '<span class="ea-data-pill">No submitted players yet</span>';
       const runtimeSteps = Array.isArray(runState?.steps) ? runState.steps : [];
       const stepRows = runtimeSteps.length
         ? runtimeSteps
@@ -16426,14 +16788,29 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         <div class="ea-data-sequence-surface">
           <div class="ea-data-sequence-surface__head">
             <div>
-              <div class="ea-data-sequence-surface__title">Execution Dashboard</div>
-              <div class="ea-data-sequence-surface__copy">Per-step progress and aggregate challenge counters.</div>
+              <div class="ea-data-sequence-surface__title">Execution</div>
+              <div class="ea-data-sequence-surface__copy">Live progress, results, and submitted-player summary.</div>
             </div>
             <div class="ea-data-sequence-run-badge" data-status="${escapeHtml(
               runBadgeStatus,
             )}">${escapeHtml(statusText)}</div>
           </div>
           <div class="ea-data-sequence-runtime">
+            <div class="ea-data-sequence-progress">
+              <div class="ea-data-sequence-progress-meta">
+                <span>${escapeHtml(
+                  plannedChallenges > 0
+                    ? `${processedChallenges}/${plannedChallenges} challenge attempts`
+                    : `${processedChallenges} challenge attempts`,
+                )}</span>
+                <span>${escapeHtml(`${progressPct}%`)}</span>
+              </div>
+              <div class="ea-data-sequence-progress-track">
+                <div class="ea-data-sequence-progress-fill" style="--progress-pct:${escapeHtml(
+                  `${progressPct}%`,
+                )}"></div>
+              </div>
+            </div>
             <div class="ea-data-sequence-runtime-counters">
               <div class="ea-data-sequence-counter">
                 <div class="ea-data-sequence-counter-label">Solved</div>
@@ -16458,8 +16835,27 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               progressCopy,
             )}</div>
             <div class="ea-data-sequence-runtime-message">${escapeHtml(
-              messages.join(" \u2022 ") || "Idle. Configure a plan and start when ready.",
+              messages.join(" \u2022 ") ||
+                "Idle. Configure a plan and start when ready.",
             )}</div>
+            <div class="ea-data-used-summary">
+              <div class="ea-data-used-summary-top">
+                <div class="ea-data-used-summary-title">Submitted Players</div>
+                <div class="ea-data-preview-right">
+                  <span class="ea-data-pill">Players ${escapeHtml(
+                    usedSummary?.playerCount ?? 0,
+                  )}</span>
+                  <span class="ea-data-pill${
+                    (readNumeric(usedSummary?.specialCount) ?? 0) > 0
+                      ? " ea-data-pill--special"
+                      : ""
+                  }">Special ${escapeHtml(
+                    usedSummary?.specialCount ?? 0,
+                  )}</span>
+                </div>
+              </div>
+              <div class="ea-data-used-summary-pills">${usedRatingPills}</div>
+            </div>
             <div class="ea-data-sequence-runtime-steps">${stepRows}</div>
           </div>
         </div>
@@ -16475,18 +16871,15 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       }
       const isRunning = Boolean(sequenceSolveOverlayState?.running);
       const planName = sanitizeDisplayText(plan?.name) ?? "Sequence Plan";
+      const planLoops = clampSequenceLoopCount(plan?.policy?.planLoopCount ?? 1, 1);
       settingsPanelEl.innerHTML = `
         <div class="ea-data-sequence-surface">
           <div class="ea-data-sequence-surface__head">
             <div>
-              <div class="ea-data-sequence-surface__title">Plan Settings</div>
-              <div class="ea-data-sequence-surface__copy">Plan metadata and global configuration.</div>
+              <div class="ea-data-sequence-surface__title">Plan Setup</div>
+              <div class="ea-data-sequence-surface__copy">Name the plan and choose how many full passes it should run.</div>
             </div>
-            <div class="ea-data-sequence-badge">${
-              plan?.policy?.submitMode === "step_transactional"
-                ? "Transactional"
-                : "Planner"
-            }</div>
+            <div class="ea-data-sequence-badge">Loops ${escapeHtml(planLoops)}x</div>
           </div>
           <div class="ea-data-sequence-plan-meta-grid">
             <label class="ea-data-sequence-field">
@@ -16506,9 +16899,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   min="${SEQUENCE_LOOP_COUNT_MIN}"
                   max="${SEQUENCE_LOOP_COUNT_MAX}"
                   step="1"
-                  value="${escapeHtml(
-                    clampSequenceLoopCount(plan?.policy?.planLoopCount ?? 1, 1),
-                  )}"
+                  value="${escapeHtml(planLoops)}"
                   inputmode="numeric"
                   ${isRunning ? "disabled" : ""}
                 />
@@ -16516,9 +16907,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               </div>
             </div>
             <div class="ea-data-sequence-field">
-              <span class="ea-data-sequence-label">Policy</span>
-              <div class="ea-data-sequence-step-target-copy">Failure mode: hybrid skip/stop. Player pool: global depletion. Submit mode: step transaction.</div>
-              <div class="ea-data-sequence-step-target-copy">Plan loops: fixed count. Step loops: fixed count per step.</div>
+              <span class="ea-data-sequence-label">How It Runs</span>
+              <div class="ea-data-sequence-step-target-copy">Skips challenges that have no solution.</div>
+              <div class="ea-data-sequence-step-target-copy">Stops if the web app returns a hard error.</div>
+              <div class="ea-data-sequence-step-target-copy">Uses one shared player pool across the whole sequence.</div>
               <div class="ea-data-sequence-step-target-copy">Updated ${escapeHtml(
                 formatShortDate(plan?.updatedAt),
               )}</div>
@@ -16527,6 +16919,19 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         </div>
         <button type="button" class="ea-data-btn ea-data-btn--info" id="ea-data-sequence-refresh-btn" ${isRunning ? "disabled" : ""}>Refresh SBC Data</button>
       `;
+    };
+
+    const getSequenceStepMotionClass = (stepId) => {
+      const motion = sequenceSolveOverlayState?.stepMotion ?? null;
+      if (!motion) return "";
+      if (Date.now() > (readNumeric(motion?.until) ?? 0)) return "";
+      if (String(motion?.stepId) !== String(stepId)) return "";
+      if (motion?.kind === "move_up") return " is-move-up";
+      if (motion?.kind === "move_down") return " is-move-down";
+      if (motion?.kind === "enable") return " is-enable-toggle";
+      if (motion?.kind === "disable") return " is-disable-toggle";
+      if (motion?.kind === "new") return " is-new";
+      return "";
     };
 
     const renderEditor = () => {
@@ -16553,7 +16958,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               const validation =
                 validationSummary?.perStep?.get?.(String(normalizedStep?.id)) ??
                 validateSequenceStep(normalizedStep);
-              const compatibleSets = getCompatibleSetsForKind(target?.kind);
+              const compatibleSets = getCompatibleSetsForKind(target?.kind, {
+                includeSetId: target?.setId,
+              });
               const compatibleSelected = compatibleSets.find(
                 (entry) =>
                   readNumeric(entry?.id) === readNumeric(target?.setId),
@@ -16563,16 +16970,20 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 ? sanitizeDisplayText(runRecord?.status)
                 : normalizedStep?.enabled === false
                   ? "disabled"
+                  : validation.valid && validation.availableNow === false
+                    ? "waiting"
                   : !validation.valid
-                    ? "invalid"
-                    : "ready";
+                     ? "invalid"
+                     : "ready";
               const statusKey = runRecord?.status
                 ? normalizeRunStatusKey(runRecord.status)
                 : normalizedStep?.enabled === false
                   ? normalizeRunStatusKey("skipped")
+                  : validation.valid && validation.availableNow === false
+                    ? normalizeRunStatusKey("waiting")
                   : !validation.valid
-                    ? "invalid"
-                    : normalizeRunStatusKey("pending");
+                     ? "invalid"
+                     : normalizeRunStatusKey("pending");
               const isExpanded = String(normalizedStep?.id) === String(expandedStepId);
               const setOptionsHtml = compatibleSets.length
                 ? [
@@ -16582,10 +16993,17 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                     ...compatibleSets.map((entry) => {
                       const selected =
                         readNumeric(entry?.id) === readNumeric(target?.setId);
+                      const optionLabel = `${sanitizeDisplayText(
+                        entry?.name,
+                      ) ?? `Set ${entry?.id}`}${
+                        selected && entry?.isCompletable === false
+                          ? " (no open work right now)"
+                          : ""
+                      }`;
                       return `<option value="${escapeHtml(entry?.id)}"${
                         selected ? " selected" : ""
                       }>${escapeHtml(
-                        sanitizeDisplayText(entry?.name) ?? `Set ${entry?.id}`,
+                        optionLabel,
                       )}</option>`;
                     }),
                   ].join("")
@@ -16626,7 +17044,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 1,
               );
               return `
-                <div class="ea-data-sequence-step-card${isExpanded ? " is-expanded" : ""}${normalizedStep?.enabled ? "" : " is-disabled"}${!validation.valid && normalizedStep?.enabled !== false ? " is-invalid" : ""}">
+                <div class="ea-data-sequence-step-card${isExpanded ? " is-expanded" : ""}${normalizedStep?.enabled ? "" : " is-disabled"}${!validation.valid && normalizedStep?.enabled !== false ? " is-invalid" : ""}${getSequenceStepMotionClass(normalizedStep?.id)}" data-step-card-id="${escapeHtml(normalizedStep?.id)}">
                   <div class="ea-data-sequence-step-summary" data-step-toggle-id="${escapeHtml(normalizedStep?.id)}">
                     <div class="ea-data-sequence-step-summary-left">
                       <div class="ea-data-sequence-step-chevron">\u25B6</div>
@@ -16668,90 +17086,96 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                     </div>
                   </div>
                   <div class="ea-data-sequence-step-detail">
-                    <div class="ea-data-sequence-step-grid ea-data-sequence-step-grid--triple">
-                      <div class="ea-data-sequence-field">
-                        <label class="ea-data-sequence-label">Target Type</label>
-                        <select class="ea-data-sequence-select" data-step-id="${escapeHtml(
-                          normalizedStep?.id,
-                        )}" data-step-field="kind" ${isRunning ? "disabled" : ""}>
-                          <option value="${SEQUENCE_TARGET_KIND_SINGLE}"${
-                            target?.kind === SEQUENCE_TARGET_KIND_SINGLE
-                              ? " selected"
-                              : ""
-                          }>Single Challenge</option>
-                          <option value="${SEQUENCE_TARGET_KIND_SET_SCOPE}"${
-                            target?.kind === SEQUENCE_TARGET_KIND_SET_SCOPE
-                              ? " selected"
-                              : ""
-                          }>Entire Set</option>
-                        </select>
-                      </div>
-                      <div class="ea-data-sequence-field">
-                        <label class="ea-data-sequence-label">SBC Set</label>
-                        <select class="ea-data-sequence-select" data-step-id="${escapeHtml(
-                          normalizedStep?.id,
-                        )}" data-step-field="setId" ${isRunning || !compatibleSets.length ? "disabled" : ""}>
-                          ${setOptionsHtml}
-                        </select>
-                      </div>
-                      <div class="ea-data-sequence-field">
-                        <label class="ea-data-sequence-label">Loop Count</label>
-                        <div class="ea-data-times-stepper">
-                          <button type="button" class="ea-data-times-stepper__btn" data-step="down" data-target="ea-data-sequence-step-loop-${escapeHtml(
+                    <div class="ea-data-sequence-step-detail-body">
+                      <div class="ea-data-sequence-step-grid ea-data-sequence-step-grid--triple">
+                        <div class="ea-data-sequence-field">
+                          <label class="ea-data-sequence-label">Target Type</label>
+                          <select class="ea-data-sequence-select" data-step-id="${escapeHtml(
                             normalizedStep?.id,
-                          )}" aria-label="Decrease step loops" ${isRunning ? "disabled" : ""}>-</button>
-                          <input
-                            class="ea-data-range__number ea-data-times-stepper__input"
-                            id="ea-data-sequence-step-loop-${escapeHtml(
+                          )}" data-step-field="kind" ${isRunning ? "disabled" : ""}>
+                            <option value="${SEQUENCE_TARGET_KIND_SINGLE}"${
+                              target?.kind === SEQUENCE_TARGET_KIND_SINGLE
+                                ? " selected"
+                                : ""
+                            }>Single Challenge</option>
+                            <option value="${SEQUENCE_TARGET_KIND_SET_SCOPE}"${
+                              target?.kind === SEQUENCE_TARGET_KIND_SET_SCOPE
+                                ? " selected"
+                                : ""
+                            }>Entire Set</option>
+                          </select>
+                        </div>
+                        <div class="ea-data-sequence-field">
+                          <label class="ea-data-sequence-label">SBC Set</label>
+                          <select class="ea-data-sequence-select" data-step-id="${escapeHtml(
+                            normalizedStep?.id,
+                          )}" data-step-field="setId" ${isRunning || !compatibleSets.length ? "disabled" : ""}>
+                            ${setOptionsHtml}
+                          </select>
+                        </div>
+                        <div class="ea-data-sequence-field">
+                          <label class="ea-data-sequence-label">Loop Count</label>
+                          <div class="ea-data-times-stepper">
+                            <button type="button" class="ea-data-times-stepper__btn" data-step="down" data-target="ea-data-sequence-step-loop-${escapeHtml(
                               normalizedStep?.id,
-                            )}"
-                            type="number"
-                            min="${SEQUENCE_LOOP_COUNT_MIN}"
-                            max="${SEQUENCE_LOOP_COUNT_MAX}"
-                            step="1"
-                            value="${escapeHtml(stepLoopCount)}"
-                            inputmode="numeric"
-                            data-step-id="${escapeHtml(normalizedStep?.id)}"
-                            data-step-field="loopCount"
-                            ${isRunning ? "disabled" : ""}
-                          />
-                          <button type="button" class="ea-data-times-stepper__btn" data-step="up" data-target="ea-data-sequence-step-loop-${escapeHtml(
+                            )}" aria-label="Decrease step loops" ${isRunning ? "disabled" : ""}>-</button>
+                            <input
+                              class="ea-data-range__number ea-data-times-stepper__input"
+                              id="ea-data-sequence-step-loop-${escapeHtml(
+                                normalizedStep?.id,
+                              )}"
+                              type="number"
+                              min="${SEQUENCE_LOOP_COUNT_MIN}"
+                              max="${SEQUENCE_LOOP_COUNT_MAX}"
+                              step="1"
+                              value="${escapeHtml(stepLoopCount)}"
+                              inputmode="numeric"
+                              data-step-id="${escapeHtml(normalizedStep?.id)}"
+                              data-step-field="loopCount"
+                              ${isRunning ? "disabled" : ""}
+                            />
+                            <button type="button" class="ea-data-times-stepper__btn" data-step="up" data-target="ea-data-sequence-step-loop-${escapeHtml(
+                              normalizedStep?.id,
+                            )}" aria-label="Increase step loops" ${isRunning ? "disabled" : ""}>+</button>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="ea-data-sequence-step-target-copy">${escapeHtml(
+                        target?.kind === SEQUENCE_TARGET_KIND_SET_SCOPE
+                          ? "Entire Set will solve every currently open squad in the selected multi-squad SBC set."
+                          : "Single Challenge will solve the only currently open squad in the selected standalone SBC set.",
+                      )}</div>
+                      ${
+                        validation.valid
+                          ? validation.notice
+                            ? `<div class="ea-data-sequence-step-target-copy ea-data-sequence-step-target-copy--notice">${escapeHtml(
+                                validation.notice,
+                              )}</div>`
+                            : ""
+                          : `<div class="ea-data-sequence-step-target-copy ea-data-sequence-step-target-copy--invalid">${escapeHtml(
+                              validation.reason,
+                            )}</div>`
+                      }
+                      <div class="ea-data-sequence-step-grid">
+                        <div class="ea-data-sequence-field">
+                          <label class="ea-data-sequence-label">Rating Range</label>
+                          <div class="ea-data-sequence-range-row">
+                            <input class="ea-data-sequence-input" type="number" min="0" max="99" step="1" value="${escapeHtml(
+                              normalizedStep?.settingsSnapshot?.ratingRange?.ratingMin ?? 0,
+                            )}" data-step-id="${escapeHtml(
                             normalizedStep?.id,
-                          )}" aria-label="Increase step loops" ${isRunning ? "disabled" : ""}>+</button>
+                          )}" data-step-field="ratingMin" ${isRunning ? "disabled" : ""} />
+                            <input class="ea-data-sequence-input" type="number" min="0" max="99" step="1" value="${escapeHtml(
+                              normalizedStep?.settingsSnapshot?.ratingRange?.ratingMax ?? 99,
+                            )}" data-step-id="${escapeHtml(
+                            normalizedStep?.id,
+                          )}" data-step-field="ratingMax" ${isRunning ? "disabled" : ""} />
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                    <div class="ea-data-sequence-step-target-copy">${escapeHtml(
-                      target?.kind === SEQUENCE_TARGET_KIND_SET_SCOPE
-                        ? "Entire Set will solve every currently open squad in the selected multi-squad SBC set."
-                        : "Single Challenge will solve the only currently open squad in the selected standalone SBC set.",
-                    )}</div>
-                    ${
-                      validation.valid
-                        ? ""
-                        : `<div class="ea-data-sequence-step-target-copy ea-data-sequence-step-target-copy--invalid">${escapeHtml(
-                            validation.reason,
-                          )}</div>`
-                    }
-                    <div class="ea-data-sequence-step-grid">
-                      <div class="ea-data-sequence-field">
-                        <label class="ea-data-sequence-label">Rating Range</label>
-                        <div class="ea-data-sequence-range-row">
-                          <input class="ea-data-sequence-input" type="number" min="0" max="99" step="1" value="${escapeHtml(
-                            normalizedStep?.settingsSnapshot?.ratingRange?.ratingMin ?? 0,
-                          )}" data-step-id="${escapeHtml(
-                          normalizedStep?.id,
-                        )}" data-step-field="ratingMin" ${isRunning ? "disabled" : ""} />
-                          <input class="ea-data-sequence-input" type="number" min="0" max="99" step="1" value="${escapeHtml(
-                            normalizedStep?.settingsSnapshot?.ratingRange?.ratingMax ?? 99,
-                          )}" data-step-id="${escapeHtml(
-                          normalizedStep?.id,
-                        )}" data-step-field="ratingMax" ${isRunning ? "disabled" : ""} />
+                        <div class="ea-data-sequence-field ea-data-sequence-field--span-2">
+                          <label class="ea-data-sequence-label">Pool Options</label>
+                          <div class="ea-data-sequence-toggle-list">${toggleRows}</div>
                         </div>
-                      </div>
-                      <div class="ea-data-sequence-field ea-data-sequence-field--span-2">
-                        <label class="ea-data-sequence-label">Pool Options</label>
-                        <div class="ea-data-sequence-toggle-list">${toggleRows}</div>
                       </div>
                     </div>
                   </div>
@@ -16843,6 +17267,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         await refreshSequenceDiscovery({ force });
         const active = await ensureLocalPlan();
         await ensurePlanSelections(active, { forceChallenges: false });
+        ensureExpandedStepForPlan(active);
       })()
         .catch((error) => {
           log("debug", "[EA Data] Sequence overlay load failed", error);
@@ -16884,6 +17309,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         state.plans[0]?.id ??
         null;
       state.dirty = false;
+      ensureExpandedStepForPlan(getActivePlan());
       render();
       showToast({
         type: "success",
@@ -16903,15 +17329,25 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       });
       state.plans = Array.isArray(state?.plans) ? state.plans.concat(plan) : [plan];
       state.activePlanId = plan.id;
+      state.expandedStepId = plan?.steps?.[0]?.id ?? null;
       state.dirty = true;
       await ensurePlanSelections(plan, { forceChallenges: false });
       render();
     };
 
-    const deleteActivePlan = async () => {
+    const deleteActivePlan = async (planId = null) => {
       const state = sequenceSolveOverlayState;
-      const active = getActivePlan();
+      const active =
+        (Array.isArray(state?.plans) ? state.plans : []).find(
+          (plan) =>
+            String(plan?.id) ===
+            String(sanitizeDisplayText(planId) ?? state?.activePlanId),
+        ) ?? getActivePlan();
       if (!active) return;
+      const confirmed = window.confirm(
+        `Delete \"${sanitizeDisplayText(active?.name) ?? "this plan"}\"? This removes the saved plan and all of its steps.`,
+      );
+      if (!confirmed) return;
       state.plans = (state?.plans ?? []).filter(
         (plan) => String(plan?.id) !== String(active?.id),
       );
@@ -16925,7 +17361,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       }
       state.activePlanId = state.plans[0]?.id ?? null;
       state.dirty = true;
-      await ensurePlanSelections(getActivePlan(), { forceChallenges: false });
+      const nextActive = getActivePlan();
+      await ensurePlanSelections(nextActive, { forceChallenges: false });
+      ensureExpandedStepForPlan(nextActive);
       render();
     };
 
@@ -16938,6 +17376,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           sequenceSolveOverlayState?.defaultSettings ?? getDefaultSolverSettings(),
       });
       plan.steps = Array.isArray(plan?.steps) ? plan.steps.concat(nextStep) : [nextStep];
+      sequenceSolveOverlayState.expandedStepId = nextStep.id;
+      sequenceSolveOverlayState.stepMotion = {
+        stepId: nextStep.id,
+        kind: "new",
+        until: Date.now() + 700,
+      };
       touchPlans();
       await ensurePlanSelections(plan, { forceChallenges: false });
       render();
@@ -16959,6 +17403,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         ...step,
         order: stepIndex,
       }));
+      sequenceSolveOverlayState.stepMotion = {
+        stepId,
+        kind: direction === "up" ? "move_up" : "move_down",
+        until: Date.now() + 620,
+      };
       touchPlans();
       render();
     };
@@ -16966,17 +17415,92 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const removeStep = (stepId) => {
       const plan = getActivePlan();
       if (!plan || !Array.isArray(plan?.steps) || plan.steps.length <= 1) return;
+      const removedIndex = plan.steps.findIndex(
+        (step) => String(step?.id) === String(stepId),
+      );
       plan.steps = plan.steps
         .filter((step) => String(step?.id) !== String(stepId))
         .map((step, stepIndex) => ({
           ...step,
           order: stepIndex,
         }));
+      const fallbackStep =
+        plan.steps[Math.min(Math.max(removedIndex, 0), plan.steps.length - 1)] ??
+        plan.steps[plan.steps.length - 1] ??
+        null;
+      ensureExpandedStepForPlan(plan, {
+        preferredStepId: fallbackStep?.id ?? null,
+      });
       touchPlans();
       render();
     };
 
-    const buildInitialRunState = (plan) => ({
+    const createEmptyRunUsedSummary = () => ({
+      playerCount: 0,
+      specialCount: 0,
+      ratings: {},
+    });
+
+    const getRunProcessedChallengeCount = (runState) =>
+      (readNumeric(runState?.counters?.solved) ?? 0) +
+      (readNumeric(runState?.counters?.skipped) ?? 0) +
+      (readNumeric(runState?.counters?.failed) ?? 0);
+
+    const recordRunUsedPlayers = (solutionIds, runContext) => {
+      const runState = sequenceSolveOverlayState?.runState ?? null;
+      if (!runState || !Array.isArray(solutionIds) || !solutionIds.length) {
+        return;
+      }
+      if (!runState.usedSummary || typeof runState.usedSummary !== "object") {
+        runState.usedSummary = createEmptyRunUsedSummary();
+      }
+      const summary = runState.usedSummary;
+      if (!summary.ratings || typeof summary.ratings !== "object") {
+        summary.ratings = {};
+      }
+      for (const id of solutionIds) {
+        if (id == null) continue;
+        summary.playerCount += 1;
+        const player =
+          runContext?.playerById?.get?.(String(id)) ??
+          runContext?.playerById?.get?.(id) ??
+          null;
+        const rating = normalizeRatingValue(player?.rating);
+        if (rating != null) {
+          const key = String(rating);
+          summary.ratings[key] = (readNumeric(summary.ratings[key]) ?? 0) + 1;
+        }
+        if (player?.isSpecial) {
+          summary.specialCount += 1;
+        }
+      }
+    };
+
+    const estimateStepOpenChallenges = async (step) => {
+      const validation = validateSequenceStep(step);
+      if (!validation.valid) return 0;
+      const target = normalizeSequenceTarget(step?.target);
+      const setId = readNumeric(target?.setId);
+      if (setId == null) return 0;
+      const challenges = await ensureChallengesForSet(setId, { force: true });
+      if (!Array.isArray(challenges) || !challenges.length) return 0;
+      if (target.kind === SEQUENCE_TARGET_KIND_SET_SCOPE) {
+        return challenges.length;
+      }
+      return challenges.length === 1 ? 1 : 0;
+    };
+
+    const estimatePlannedChallenges = async (steps, planLoopCount) => {
+      let total = 0;
+      for (const step of steps ?? []) {
+        const baseCount = await estimateStepOpenChallenges(step);
+        const stepLoops = clampSequenceLoopCount(step?.loopCount ?? 1, 1);
+        total += baseCount * stepLoops * clampSequenceLoopCount(planLoopCount, 1);
+      }
+      return total;
+    };
+
+    const buildInitialRunState = (plan, { plannedChallenges = 0 } = {}) => ({
       runId: createSequenceEntityId("sequence-run"),
       status: "running",
       currentStepId: null,
@@ -16990,6 +17514,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         skipped: 0,
         failed: 0,
       },
+      plannedChallenges:
+        Math.max(0, Math.floor(readNumeric(plannedChallenges) ?? 0)) || 0,
+      usedSummary: createEmptyRunUsedSummary(),
       firstError: null,
       stopReason: null,
       steps: (plan?.steps ?? []).map((step, index) => ({
@@ -17296,6 +17823,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         );
       }
 
+      recordRunUsedPlayers(solutionIds, runContext);
       for (const id of solutionIds) {
         if (id == null) continue;
         runContext.usedPlayerIds.add(String(id));
@@ -17381,6 +17909,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         if (!bridgeReady) {
           throw new Error("Solver bridge is not ready.");
         }
+
+        setRuntimeStatus("Scanning open SBCs...");
+        sequenceSolveOverlayState.runState.plannedChallenges =
+          await estimatePlannedChallenges(enabledSteps, requestedPlanLoops);
+        render();
 
         const allSetIds = Array.from(
           new Set(
@@ -17802,19 +18335,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         event.stopPropagation();
         const planId = deleteBtn.getAttribute("data-plan-delete");
         if (planId && !sequenceSolveOverlayState?.running) {
-          const state = sequenceSolveOverlayState;
-          const plans = Array.isArray(state?.plans) ? state.plans : [];
-          const idx = plans.findIndex((p) => String(p?.id) === String(planId));
-          if (idx !== -1) {
-            plans.splice(idx, 1);
-            if (!plans.length) {
-              await createPlan();
-            } else if (String(state?.activePlanId) === String(planId)) {
-              state.activePlanId = plans[Math.min(idx, plans.length - 1)]?.id ?? null;
-            }
-            touchPlans();
-            render();
-          }
+          await deleteActivePlan(planId);
         }
         return;
       }
@@ -17822,10 +18343,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const planId = planCard?.getAttribute?.("data-plan-id");
       if (!planId || sequenceSolveOverlayState?.running) return;
       sequenceSolveOverlayState.activePlanId = planId;
-      sequenceSolveOverlayState.expandedStepId = null;
       const active = getActivePlan();
       if (active) {
         await ensurePlanSelections(active, { forceChallenges: false });
+        ensureExpandedStepForPlan(active);
       }
       render();
     });
@@ -17838,8 +18359,17 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         const toggleId = summaryRow.getAttribute("data-step-toggle-id");
         if (toggleId) {
           const state = sequenceSolveOverlayState;
-          state.expandedStepId = String(state?.expandedStepId) === String(toggleId) ? null : toggleId;
-          renderEditor();
+          state.expandedStepId = toggleId;
+          const cards = stepsPanelEl
+            ? Array.from(stepsPanelEl.querySelectorAll("[data-step-card-id]"))
+            : [];
+          for (const card of cards) {
+            const cardId = card?.getAttribute?.("data-step-card-id");
+            card?.classList?.toggle?.(
+              "is-expanded",
+              String(cardId) === String(state?.expandedStepId),
+            );
+          }
           return;
         }
       }
@@ -17902,6 +18432,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       }
       if (field === "enabled") {
         step.enabled = Boolean(target.checked);
+        sequenceSolveOverlayState.stepMotion = {
+          stepId,
+          kind: step.enabled ? "enable" : "disable",
+          until: Date.now() + 540,
+        };
         touchPlans();
         render();
         return;
@@ -18017,7 +18552,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       runState: null,
       loadingPromise: null,
       activeTab: "steps",
+      tabTransitionTimers: [],
       expandedStepId: null,
+      stepMotion: null,
       setRuntimeStatus,
       render,
       switchTab,
@@ -18263,7 +18800,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     if (!(button instanceof HTMLButtonElement)) return;
     button.textContent = "Sequence Solver";
     button.setAttribute("aria-label", "Open sequence solver");
-    button.title = "Build a cross-challenge sequence plan";
+    button.title = "Plan several SBCs in order and solve them in one run.";
     button.disabled = !resolveSequenceFeatureEnabledFromPreferences(
       preferencesCache?.value ?? null,
     );
@@ -24091,3 +24628,5 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     }),
   };
 })();
+
+
