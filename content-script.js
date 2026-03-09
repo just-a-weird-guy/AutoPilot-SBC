@@ -58,8 +58,38 @@ const requestBackgroundBridgeInject = (path) =>
     }
   });
 
+const exposeExtensionMetadataToPage = async () => {
+  try {
+    const root = document.documentElement;
+    const manifest = chrome.runtime.getManifest?.() ?? null;
+    const version = String(manifest?.version ?? "").trim();
+    const baseUrl = String(chrome.runtime.getURL("") ?? "").trim();
+    if (root?.dataset) {
+      if (version) root.dataset.eaDataExtensionVersion = version;
+      if (baseUrl) root.dataset.eaDataExtensionBaseUrl = baseUrl;
+    }
+    const host = document.head || document.documentElement;
+    if (host instanceof HTMLElement) {
+      let metaNode = document.getElementById("ea-data-extension-meta");
+      if (!(metaNode instanceof HTMLMetaElement)) {
+        metaNode = document.createElement("meta");
+        metaNode.id = "ea-data-extension-meta";
+        metaNode.setAttribute("name", "ea-data-extension-meta");
+        host.appendChild(metaNode);
+      }
+      if (version) metaNode.setAttribute("data-version", version);
+      if (baseUrl) metaNode.setAttribute("data-base-url", baseUrl);
+    }
+  } catch (error) {
+    console.warn("[EA Data] Failed to expose extension metadata", {
+      message: error?.message ?? String(error),
+    });
+  }
+};
+
 void (async () => {
   if (window !== window.top) return;
+  await exposeExtensionMetadataToPage();
   const bridgePath = "page/ea-data-bridge.js";
   try {
     await injectPageScript(bridgePath, { type: "module" });

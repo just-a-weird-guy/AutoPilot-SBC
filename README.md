@@ -1,25 +1,23 @@
 # AutopilotSBC
 
-AutopilotSBC is a Chrome extension that helps you complete SBCs faster in the EA FC Ultimate Team Web App.
+AutopilotSBC is a Chrome extension that helps you solve SBCs faster in the EA FC Ultimate Team Web App.
 
 ## What It Does
 
 - Builds a valid squad for the current challenge.
 - Repeats solves in one flow (`Multi`).
 - Solves open challenges in a full SBC set (`Solve Entire Set`).
-- Lets you control your player pool with simple toggles.
+- Plans and solves several different SBCs in one saved run (`Sequence Solver`).
+- Lets you control your player pool with simple toggles and rating limits.
 
 ## Main Features
 
 - `Solve Squad` for one challenge.
 - `Multi` for multiple runs of the same challenge.
 - `Solve Entire Set` for set-level automation.
-- Optional filters like:
-  - Include unassigned duplicates
-  - Use storage players only
-  - Exclude tradable players
-  - Exclude special cards
-- Rating range control (min/max OVR).
+- `Sequence Solver` for cross-challenge and cross-set runs.
+- Global defaults in EA app Settings under `SBC Solver`.
+- Built-in `Changelog` notes that open once per version and can be reopened from Settings.
 
 ## Install (Chrome)
 
@@ -51,6 +49,18 @@ AutopilotSBC is a Chrome extension that helps you complete SBCs faster in the EA
 2. Click `Solve Entire Set`.
 3. Select challenges and start.
 
+### Sequence Plans
+
+1. Open the SBC hub page.
+2. Click `Sequence Solver`.
+3. Add the SBCs you want to run in order.
+4. Save the plan and start the sequence.
+
+### Changelog
+
+1. After a fresh install or update, the extension can show a `Changelog` popup once for that version.
+2. You can reopen it later from EA app `Settings` under `SBC Solver`.
+
 ## Settings
 
 - You can save global defaults in the EA app Settings tab under `SBC Solver`.
@@ -61,6 +71,15 @@ AutopilotSBC is a Chrome extension that helps you complete SBCs faster in the EA
   - Exclude tradable
   - Exclude special
   - Include unassigned
+
+## Recent Updates
+
+- `v1.5`
+  - Added `Sequence Solver` for planning and solving multiple different SBCs in one run.
+- `v1.4`
+  - Added a changelog popup for installs and updates.
+- `v1.3`
+  - Improved player lookup and squad applying speed.
 
 ## Disclaimer
 

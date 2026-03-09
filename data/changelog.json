@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "releases": [
+    {
+      "version": "1.5",
+      "date": "2026-03-10",
+      "headline": "Sequence Solver is live",
+      "summary": "Plan and solve multiple SBCs in one run.",
+      "details": [
+        "Added the new Sequence Solver.",
+        "Save sequence plans and run them in order.",
+        "Added plan loops, step loops, and execution progress."
+      ]
+    },
+    {
+      "version": "1.4",
+      "date": "2026-03-09",
+      "headline": "Changelog and update notes",
+      "summary": "Added a changelog popup for installs and updates.",
+      "details": [
+        "Added a changelog popup after installs and updates.",
+        "Added a Changelog button in Settings.",
+        "Saved viewed status so it only opens once per version."
+      ]
+    },
+    {
+      "version": "1.3",
+      "date": "2026-03-05",
+      "headline": "Speed and solver improvements",
+      "summary": "Improved player lookup and squad applying speed.",
+      "details": [
+        "Improved player and squad applying speed.",
+        "Improved set and multi-solve stability.",
+        "Cleaner solver controls and feedback."
+      ]
+    }
+  ]
+}

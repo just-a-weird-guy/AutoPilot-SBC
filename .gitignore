@@ -10,6 +10,12 @@ Thumbs.db
 # Local captures and replay/debug tooling (not for repo)
 data/
 scripts/
+!data/
+data/*
+!data/changelog.json
+!scripts/
+scripts/*
+!scripts/changelog-entry.js
 
 backup-project.ps1
 AGENT.md

@@ -469,6 +469,37 @@
     return trimmed ? trimmed : null;
   };
 
+  const readExtensionMetadata = () => {
+    const root = document?.documentElement ?? null;
+    const dataset = root?.dataset ?? {};
+    const metaNode =
+      document?.querySelector?.('meta[name="ea-data-extension-meta"]') ?? null;
+    const version = sanitizeDisplayText(
+      metaNode?.getAttribute?.("data-version") ??
+        dataset?.eaDataExtensionVersion,
+    );
+    const rawBaseUrl = sanitizeDisplayText(
+      metaNode?.getAttribute?.("data-base-url") ??
+        dataset?.eaDataExtensionBaseUrl,
+    );
+    const baseUrl = rawBaseUrl
+      ? rawBaseUrl.endsWith("/")
+        ? rawBaseUrl
+        : `${rawBaseUrl}/`
+      : null;
+    let changelogUrl = null;
+    if (baseUrl) {
+      try {
+        changelogUrl = new URL(CHANGELOG_DATA_PATH, baseUrl).toString();
+      } catch {}
+    }
+    return {
+      version,
+      baseUrl,
+      changelogUrl,
+    };
+  };
+
   const normalizeRatingValue = (value) => {
     const n = Number(value);
     if (!Number.isFinite(n)) return null;
@@ -3842,12 +3873,14 @@
   let sbcHubHooked = false;
   let gameRewardsHooked = false;
   let itemDetailsControllerHooked = false;
-  let slotActionPanelHooked = false;
-  let appSettingsHooked = false;
-  let appSettingsControllerHooked = false;
-  let sbcHookPollingIntervalId = null;
-  let appSettingsHookPollingIntervalId = null;
-  let currencyNavBarHooked = false;
+let slotActionPanelHooked = false;
+let appSettingsHooked = false;
+let appSettingsControllerHooked = false;
+let homeHubControllerHooked = false;
+let sbcHookPollingIntervalId = null;
+let appSettingsHookPollingIntervalId = null;
+let homeHookPollingIntervalId = null;
+let currencyNavBarHooked = false;
   let currentChallenge = null;
   let lastOpenedChallengeId = null;
   let lastOpenedSetId = null;
@@ -3918,6 +3951,7 @@
   const PREF_BRIDGE_TIMEOUT_MS = 3500;
   const PAGE_BRIDGE_TIMEOUT_MS = 12000;
   const PREF_CACHE_TTL_MS = 10 * 1000;
+  const CHANGELOG_DATA_PATH = "data/changelog.json";
   const EA_DATA_SUPPORT_URL = "https://ko-fi.com/P5P5YOUU7";
   const EA_DATA_TOPBAR_SUPPORT_WRAP_CLASS = "ea-data-topbar-support-wrap";
   const EA_DATA_TOPBAR_SUPPORT_BUTTON_CLASS = "ea-data-topbar-support-btn";
@@ -3931,6 +3965,8 @@
   const EA_DATA_TOPBAR_SUPPORT_FOCUS_DELAY_MS = 350;
   let preferencesCache = null; // { at: number, value: object }
   let preferencesInFlight = null;
+  let changelogCache = null;
+  let changelogInFlight = null;
   let topbarSupportObserver = null;
   let topbarSupportObserverStarted = false;
   let topbarSupportObserverRoot = null;
@@ -3944,6 +3980,10 @@
   let topbarSupportTooltipTimer = null;
   let topbarSupportTooltipHideTimer = null;
   let topbarSupportTooltipViewportListenersAttached = false;
+  let whatsNewOverlayState = null;
+  let whatsNewOverlayKeyHandlerBound = false;
+  let whatsNewAutoOpenCompleted = false;
+  let whatsNewAutoOpenCheckInFlight = null;
   let loadingOverlayCount = 0;
 
   const ensureSolveButtonStyles = () => {
@@ -4856,14 +4896,14 @@
   -moz-appearance: none;
   appearance: none;
   color-scheme: dark;
-  padding-right: 36px;
+  padding-right: 46px;
   background-image:
     linear-gradient(45deg, transparent 50%, rgba(255, 186, 78, 0.82) 50%),
     linear-gradient(135deg, rgba(255, 186, 78, 0.82) 50%, transparent 50%);
   background-position:
-    calc(100% - 18px) calc(50% - 2px),
-    calc(100% - 12px) calc(50% - 2px);
-  background-size: 6px 6px, 6px 6px;
+    calc(100% - 24px) calc(50% - 3px),
+    calc(100% - 15px) calc(50% - 3px);
+  background-size: 9px 9px, 9px 9px;
   background-repeat: no-repeat;
 }
 .ea-data-sequence-select option {
@@ -4960,18 +5000,32 @@
 }
 .ea-data-sequence-step-chevron {
   flex-shrink: 0;
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(200, 200, 210, 0.35);
-  font-size: 10px;
-  transition: transform 380ms cubic-bezier(0.22, 1, 0.36, 1), color 260ms ease;
+  color: rgba(255, 223, 168, 0.9);
+  font-size: 13px;
+  font-weight: 900;
+  border-radius: 999px;
+  background: rgba(180, 120, 20, 0.14);
+  box-shadow:
+    0 0 0 1px rgba(255, 190, 90, 0.12) inset,
+    0 6px 14px rgba(0, 0, 0, 0.18);
+  transition:
+    transform 380ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 260ms ease,
+    background 260ms ease,
+    box-shadow 260ms ease;
 }
 .ea-data-sequence-step-card.is-expanded .ea-data-sequence-step-chevron {
   transform: rotate(90deg);
-  color: rgba(255, 200, 100, 0.7);
+  color: rgba(255, 238, 205, 0.98);
+  background: rgba(180, 120, 20, 0.24);
+  box-shadow:
+    0 0 0 1px rgba(255, 205, 110, 0.18) inset,
+    0 8px 18px rgba(90, 46, 8, 0.22);
 }
 .ea-data-sequence-step-title {
   color: rgba(240, 240, 240, 0.88);
@@ -5634,6 +5688,19 @@
   background: rgba(213, 59, 59, 0.28) !important;
   border-color: #d53b3b !important;
 }
+.ea-data-app-settings-btn--info {
+  background: rgba(180, 120, 20, 0.14) !important;
+  border-color: rgba(255, 190, 60, 0.72) !important;
+  color: rgba(255, 225, 170, 0.96) !important;
+}
+.ea-data-app-settings-btn--info:hover {
+  background: rgba(180, 120, 20, 0.24) !important;
+  border-color: rgba(255, 200, 80, 0.92) !important;
+}
+.ea-data-app-settings-btn--info:active {
+  background: rgba(154, 96, 12, 0.3) !important;
+  border-color: rgba(255, 190, 60, 0.92) !important;
+}
 .ea-data-app-settings-group .ea-data-range {
   width: 100%;
 }
@@ -6076,6 +6143,363 @@
 }
 .ea-data-settings-close:active {
   transform: translateY(1px);
+}
+.ea-data-whats-new-overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(3, 5, 10, 0.86);
+  backdrop-filter: blur(8px);
+  z-index: 1000004;
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+.ea-data-whats-new-overlay[aria-hidden="false"] {
+  display: flex;
+}
+.ea-data-whats-new-modal {
+  width: min(860px, calc(100vw - 28px));
+  max-height: min(90vh, 900px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background:
+    radial-gradient(circle at top left, rgba(255, 184, 78, 0.12), transparent 42%),
+    radial-gradient(circle at bottom right, rgba(71, 125, 255, 0.12), transparent 40%),
+    linear-gradient(180deg, rgba(14, 18, 28, 0.98) 0%, rgba(8, 11, 18, 0.99) 100%);
+  box-shadow:
+    0 36px 100px rgba(0, 0, 0, 0.62),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  color: #fff;
+}
+.ea-data-whats-new-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ea-data-whats-new-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.ea-data-whats-new-title {
+  color: rgba(255, 245, 225, 0.98);
+  font-size: 29px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+}
+.ea-data-whats-new-subtitle {
+  max-width: 620px;
+  color: rgba(214, 219, 232, 0.7);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ea-data-whats-new-header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.ea-data-whats-new-badge {
+  min-height: 30px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(220, 226, 240, 0.74);
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 0.55px;
+  text-transform: uppercase;
+}
+.ea-data-whats-new-badge--accent {
+  border-color: rgba(100, 180, 255, 0.24);
+  background: rgba(30, 100, 200, 0.1);
+  color: rgba(170, 215, 255, 0.94);
+}
+.ea-data-whats-new-close {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(240, 240, 245, 0.86);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    transform 180ms ease;
+}
+.ea-data-whats-new-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.ea-data-whats-new-close:active {
+  transform: translateY(1px);
+}
+.ea-data-whats-new-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 24px 18px;
+}
+.ea-data-whats-new-empty {
+  padding: 24px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(214, 219, 232, 0.76);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.ea-data-whats-new-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ea-data-whats-new-release {
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+  overflow: hidden;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+.ea-data-whats-new-release:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.038);
+}
+.ea-data-whats-new-release.is-current {
+  border-color: rgba(255, 194, 84, 0.3);
+  background:
+    linear-gradient(135deg, rgba(180, 120, 20, 0.08), rgba(255, 255, 255, 0.02));
+  box-shadow: 0 16px 28px rgba(0, 0, 0, 0.18);
+}
+.ea-data-whats-new-release.is-expanded {
+  transform: translateY(-1px);
+}
+.ea-data-whats-new-release-toggle {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  padding: 18px 18px 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.ea-data-whats-new-release-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.ea-data-whats-new-release-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ea-data-whats-new-release-version {
+  color: rgba(255, 240, 205, 0.98);
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+.ea-data-whats-new-release-date {
+  color: rgba(214, 219, 232, 0.52);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ea-data-whats-new-release-chip {
+  min-height: 22px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(60, 190, 120, 0.3);
+  background: rgba(34, 120, 70, 0.16);
+  color: rgba(130, 235, 180, 0.94);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.ea-data-whats-new-release-headline {
+  color: rgba(248, 248, 252, 0.97);
+  font-size: 18px;
+  line-height: 1.25;
+  font-weight: 800;
+}
+.ea-data-whats-new-release-summary {
+  color: rgba(214, 219, 232, 0.76);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.ea-data-whats-new-release-chevron {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 226, 178, 0.92);
+  background: rgba(180, 120, 20, 0.14);
+  box-shadow:
+    0 0 0 1px rgba(255, 194, 84, 0.1) inset,
+    0 10px 18px rgba(0, 0, 0, 0.14);
+  font-size: 15px;
+  font-weight: 900;
+  transition:
+    transform 240ms ease,
+    background 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease;
+}
+.ea-data-whats-new-release.is-expanded .ea-data-whats-new-release-chevron {
+  transform: rotate(180deg);
+  color: rgba(255, 244, 220, 0.98);
+  background: rgba(180, 120, 20, 0.24);
+  box-shadow:
+    0 0 0 1px rgba(255, 205, 110, 0.16) inset,
+    0 12px 22px rgba(90, 46, 8, 0.18);
+}
+.ea-data-whats-new-release-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 260ms ease,
+    opacity 220ms ease,
+    border-color 180ms ease;
+  border-top: 1px solid rgba(255, 255, 255, 0);
+}
+.ea-data-whats-new-release.is-expanded .ea-data-whats-new-release-body {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  border-top-color: rgba(255, 255, 255, 0.06);
+}
+.ea-data-whats-new-release-body-inner {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 18px 18px 18px;
+}
+.ea-data-whats-new-release-details {
+  margin: 0;
+  padding-left: 18px;
+  color: rgba(234, 238, 246, 0.84);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ea-data-whats-new-release-details li::marker {
+  color: rgba(255, 190, 90, 0.92);
+}
+.ea-data-whats-new-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 16px 24px 22px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ea-data-whats-new-footer-copy {
+  color: rgba(214, 219, 232, 0.56);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ea-data-whats-new-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: auto;
+}
+.ea-data-whats-new-btn {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(245, 245, 250, 0.92);
+  font-size: 12.5px;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    transform 180ms ease;
+}
+.ea-data-whats-new-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.ea-data-whats-new-btn:active {
+  transform: translateY(1px);
+}
+.ea-data-whats-new-btn--primary {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(245, 245, 250, 0.94);
+  box-shadow: none;
+}
+.ea-data-whats-new-btn--primary:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.24);
+}
+@media (max-width: 760px) {
+  .ea-data-whats-new-overlay {
+    padding: 14px;
+  }
+  .ea-data-whats-new-header,
+  .ea-data-whats-new-body,
+  .ea-data-whats-new-footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .ea-data-whats-new-title {
+    font-size: 24px;
+  }
+  .ea-data-whats-new-header {
+    flex-direction: column;
+  }
+  .ea-data-whats-new-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ea-data-whats-new-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+  .ea-data-whats-new-btn {
+    flex: 1;
+  }
 }
 .ea-data-settings-section-label {
   color: rgba(255, 255, 255, 0.80);
@@ -7654,6 +8078,297 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     } catch {}
   };
 
+  const closeWhatsNewOverlay = ({ markSeen = true } = {}) => {
+    const overlay = document.getElementById("ea-data-whats-new-overlay");
+    if (!overlay) return;
+    overlay.setAttribute("aria-hidden", "true");
+    try {
+      overlay.style.pointerEvents = "none";
+    } catch {}
+    if (markSeen) {
+      const currentVersion = getCurrentExtensionVersion();
+      void markReleaseNotesVersionSeen(currentVersion).catch((error) => {
+        log("debug", "[EA Data] Failed to persist release notes state", error);
+      });
+    }
+  };
+
+  const ensureWhatsNewOverlay = () => {
+    ensureSolveButtonStyles();
+    const existing = document.getElementById("ea-data-whats-new-overlay");
+    if (existing && whatsNewOverlayState) return existing;
+
+    const overlay = existing || document.createElement("div");
+    overlay.id = "ea-data-whats-new-overlay";
+    overlay.className = "ea-data-whats-new-overlay";
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.innerHTML = `
+      <div class="ea-data-whats-new-modal" role="dialog" aria-modal="true" aria-labelledby="ea-data-whats-new-title">
+        <div class="ea-data-whats-new-header">
+          <div class="ea-data-whats-new-title-wrap">
+            <div class="ea-data-whats-new-title" id="ea-data-whats-new-title">Changelog</div>
+            <div class="ea-data-whats-new-subtitle" id="ea-data-whats-new-subtitle">See the latest updates in AutopilotSBC.</div>
+          </div>
+          <div class="ea-data-whats-new-header-meta">
+            <div class="ea-data-whats-new-badge ea-data-whats-new-badge--accent" id="ea-data-whats-new-version-badge">Latest</div>
+            <button type="button" class="ea-data-whats-new-close" data-action="close" aria-label="Close changelog">\u00D7</button>
+          </div>
+        </div>
+        <div class="ea-data-whats-new-body">
+          <div class="ea-data-whats-new-list" id="ea-data-whats-new-list"></div>
+        </div>
+        <div class="ea-data-whats-new-footer">
+          <div class="ea-data-whats-new-actions">
+            <button type="button" class="ea-data-whats-new-btn ea-data-whats-new-btn--primary" data-action="close-primary">Close</button>
+          </div>
+          <div class="ea-data-whats-new-footer-copy" id="ea-data-whats-new-footer-copy">This opens once after an update, then stays out of the way.</div>
+        </div>
+      </div>
+    `;
+    if (!existing) {
+      document.body.appendChild(overlay);
+    }
+
+    const releaseList = overlay.querySelector("#ea-data-whats-new-list");
+    const versionBadge = overlay.querySelector("#ea-data-whats-new-version-badge");
+    const subtitleEl = overlay.querySelector("#ea-data-whats-new-subtitle");
+    const footerCopyEl = overlay.querySelector("#ea-data-whats-new-footer-copy");
+
+    const render = () => {
+      const changelog =
+        whatsNewOverlayState?.changelog && typeof whatsNewOverlayState.changelog === "object"
+          ? whatsNewOverlayState.changelog
+          : createEmptyChangelogData();
+      const releases = Array.isArray(changelog?.releases) ? changelog.releases : [];
+      const currentVersion =
+        sanitizeDisplayText(whatsNewOverlayState?.currentVersion) ??
+        getCurrentExtensionVersion();
+      const currentRelease = findChangelogReleaseForVersion(
+        changelog,
+        currentVersion,
+      );
+      const source = whatsNewOverlayState?.source === "auto" ? "auto" : "manual";
+      const expandedVersion =
+        sanitizeDisplayText(whatsNewOverlayState?.expandedVersion) ??
+        currentRelease?.version ??
+        releases[0]?.version ??
+        null;
+
+      if (subtitleEl) {
+        subtitleEl.textContent =
+          "See the latest updates in AutopilotSBC. You can reopen this any time from Settings.";
+      }
+      if (footerCopyEl) {
+        footerCopyEl.textContent =
+          source === "auto"
+            ? "This changelog opens once for each new version."
+            : "You can open this again any time from Settings.";
+      }
+      if (versionBadge) {
+        versionBadge.textContent = currentRelease
+          ? `New in v${currentRelease.version}`
+          : releases[0]?.version
+            ? `Latest: v${releases[0].version}`
+            : "No entries";
+      }
+      if (!releaseList) return;
+
+      if (!releases.length) {
+        releaseList.innerHTML = `
+          <div class="ea-data-whats-new-empty">
+            ${
+              changelog?.loadError
+                ? "Changelog is not available right now."
+                : "No changelog entries are available yet for this version."
+            }
+          </div>
+        `;
+        return;
+      }
+
+      releaseList.innerHTML = releases
+        .map((release) => {
+          const isExpanded = expandedVersion === release.version;
+          const isCurrent =
+            sanitizeDisplayText(currentVersion) ===
+            sanitizeDisplayText(release?.version);
+          const detailsHtml = Array.isArray(release?.details) && release.details.length
+            ? `
+              <ul class="ea-data-whats-new-release-details">
+                ${release.details
+                  .map((detail) => `<li>${escapeUiText(detail)}</li>`)
+                  .join("")}
+              </ul>
+            `
+            : "";
+          return `
+            <article class="ea-data-whats-new-release${isExpanded ? " is-expanded" : ""}${isCurrent ? " is-current" : ""}" data-release-version="${escapeUiText(release.version)}">
+              <button type="button" class="ea-data-whats-new-release-toggle" data-release-toggle="${escapeUiText(release.version)}" aria-expanded="${isExpanded ? "true" : "false"}">
+                <div class="ea-data-whats-new-release-main">
+                  <div class="ea-data-whats-new-release-meta">
+                    <span class="ea-data-whats-new-release-version">v${escapeUiText(release.version)}</span>
+                    <span class="ea-data-whats-new-release-date">${escapeUiText(release.date)}</span>
+                    ${isCurrent ? '<span class="ea-data-whats-new-release-chip">New</span>' : ""}
+                  </div>
+                  <div class="ea-data-whats-new-release-headline">${escapeUiText(release.headline)}</div>
+                  <div class="ea-data-whats-new-release-summary">${escapeUiText(release.summary)}</div>
+                </div>
+                <span class="ea-data-whats-new-release-chevron" aria-hidden="true">\u25BE</span>
+              </button>
+              <div class="ea-data-whats-new-release-body" aria-hidden="${isExpanded ? "false" : "true"}">
+                <div class="ea-data-whats-new-release-body-inner">${detailsHtml}</div>
+              </div>
+            </article>
+          `;
+        })
+        .join("");
+    };
+
+    whatsNewOverlayState = {
+      overlay,
+      releaseList,
+      versionBadge,
+      subtitleEl,
+      footerCopyEl,
+      changelog: createEmptyChangelogData(),
+      currentVersion: getCurrentExtensionVersion(),
+      expandedVersion: null,
+      source: "manual",
+      render,
+    };
+
+    overlay.addEventListener("click", (event) => {
+      if (event?.target === overlay) {
+        closeWhatsNewOverlay();
+        return;
+      }
+      const actionEl = event?.target?.closest?.("[data-action]");
+      const toggleEl = event?.target?.closest?.("[data-release-toggle]");
+      if (toggleEl) {
+        const nextVersion = sanitizeDisplayText(
+          toggleEl.getAttribute("data-release-toggle"),
+        );
+        if (nextVersion) {
+          whatsNewOverlayState.expandedVersion = nextVersion;
+          whatsNewOverlayState.render();
+        }
+        return;
+      }
+      const action = sanitizeDisplayText(actionEl?.getAttribute?.("data-action"));
+      if (!action) return;
+      if (
+        action === "close" ||
+        action === "close-primary" ||
+        action === "close-secondary"
+      ) {
+        closeWhatsNewOverlay();
+        return;
+      }
+    });
+
+    if (!whatsNewOverlayKeyHandlerBound) {
+      document.addEventListener("keydown", (event) => {
+        if (event?.key !== "Escape") return;
+        const open =
+          overlay?.getAttribute?.("aria-hidden") === "false" &&
+          overlay?.style?.display !== "none";
+        if (!open) return;
+        closeWhatsNewOverlay();
+      });
+      whatsNewOverlayKeyHandlerBound = true;
+    }
+
+    return overlay;
+  };
+
+  const openWhatsNewOverlay = async ({ source = "manual" } = {}) => {
+    const overlay = ensureWhatsNewOverlay();
+    const forceReload =
+      source === "manual" &&
+      Boolean(whatsNewOverlayState?.changelog?.loadError);
+    const changelog = await getChangelogData({ force: forceReload });
+    const currentVersion = getCurrentExtensionVersion();
+    whatsNewOverlayState.changelog = changelog;
+    whatsNewOverlayState.currentVersion = currentVersion;
+    whatsNewOverlayState.source = source === "auto" ? "auto" : "manual";
+    whatsNewOverlayState.expandedVersion =
+      findChangelogReleaseForVersion(changelog, currentVersion)?.version ??
+      changelog?.releases?.[0]?.version ??
+      null;
+    whatsNewOverlayState.render();
+    overlay.setAttribute("aria-hidden", "false");
+    try {
+      overlay.style.pointerEvents = "auto";
+    } catch {}
+    return true;
+  };
+
+  const getCurrentEaController = () => {
+    try {
+      if (typeof getAppMain !== "function") return null;
+      const appMain = getAppMain();
+      const rootController = appMain?.getRootViewController?.() ?? null;
+      const presentedController =
+        rootController?.getPresentedViewController?.() ?? rootController ?? null;
+      const currentViewController =
+        presentedController?.getCurrentViewController?.() ??
+        presentedController ??
+        null;
+      const currentController =
+        currentViewController?.getCurrentController?.() ??
+        currentViewController ??
+        null;
+      return currentController ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  const tryAutoOpenWhatsNewFromHomeHub = async (
+    source = "home-viewDidAppear",
+  ) => {
+    if (whatsNewAutoOpenCompleted) return false;
+    if (whatsNewAutoOpenCheckInFlight) return whatsNewAutoOpenCheckInFlight;
+
+    whatsNewAutoOpenCheckInFlight = (async () => {
+      const ready = await waitForEaReady(8000, 250);
+      if (!ready) return false;
+      await delayMs(250);
+
+      try {
+        const currentVersion = getCurrentExtensionVersion();
+        if (!currentVersion) return false;
+        const [prefs, changelog] = await Promise.all([
+          getPreferences(),
+          getChangelogData(),
+        ]);
+        if (
+          !shouldAutoOpenReleaseNotes({
+            prefs,
+            changelog,
+            currentVersion,
+          })
+        ) {
+          whatsNewAutoOpenCompleted = true;
+          return false;
+        }
+        await openWhatsNewOverlay({ source: "auto" });
+        whatsNewAutoOpenCompleted = true;
+        return true;
+      } catch (error) {
+        log("debug", "[EA Data] Failed to auto-open changelog", {
+          source,
+          error,
+        });
+        return false;
+      }
+    })().finally(() => {
+      whatsNewAutoOpenCheckInFlight = null;
+    });
+
+    return whatsNewAutoOpenCheckInFlight;
+  };
+
   const resolveAppSettingsActionsRoot = (view) => {
     if (!view) return null;
     const roots = [
@@ -7828,6 +8543,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         </div>
       </div>
       <div class="ea-data-app-settings-actions">
+        <button type="button" class="ea-data-app-settings-btn ea-data-app-settings-btn--info" data-action="open-whats-new">Changelog</button>
         <button type="button" class="ea-data-app-settings-btn ea-data-app-settings-btn--reset" data-action="reset-global">Reset Global</button>
         <button type="button" class="ea-data-app-settings-btn" data-action="save-global">Save Global</button>
       </div>
@@ -7902,6 +8618,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       "#ea-data-app-settings-excluded-nations-panel",
     );
     const resetBtn = section.querySelector('[data-action="reset-global"]');
+    const whatsNewBtn = section.querySelector('[data-action="open-whats-new"]');
     const saveBtn = section.querySelector('[data-action="save-global"]');
     const listeners = [];
     let exclusionActionInFlight = false;
@@ -8542,6 +9259,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         event?.stopPropagation?.();
       } catch {}
       toggleCollapsible(toggleExcludedNationsBtn, excludedNationsPanel);
+    });
+    on(whatsNewBtn, "click", (event) => {
+      try {
+        event?.stopPropagation?.();
+      } catch {}
+      void openWhatsNewOverlay({ source: "manual" });
     });
     on(saveBtn, "click", async (event) => {
       try {
@@ -20130,6 +20853,178 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     }
   };
 
+  const escapeUiText = (value) =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+  const normalizeReleaseNotesState = (value) => {
+    const raw = value && typeof value === "object" ? value : {};
+    return {
+      lastSeenVersion: sanitizeDisplayText(raw?.lastSeenVersion),
+      lastSeenAt: readNumeric(raw?.lastSeenAt),
+    };
+  };
+
+  const createEmptyChangelogData = (overrides = null) => ({
+    version: 1,
+    releases: [],
+    releaseMap: new Map(),
+    loadError: null,
+    ...(overrides && typeof overrides === "object" ? overrides : {}),
+  });
+
+  const normalizeChangelogRelease = (value, index = 0) => {
+    const raw = value && typeof value === "object" ? value : {};
+    const version = sanitizeDisplayText(raw?.version);
+    const date = sanitizeDisplayText(raw?.date);
+    const headline = sanitizeDisplayText(raw?.headline);
+    const summary = sanitizeDisplayText(raw?.summary);
+    const details = Array.isArray(raw?.details)
+      ? raw.details
+          .map((entry) => sanitizeDisplayText(entry))
+          .filter(Boolean)
+      : [];
+    if (!version || !date || !headline || !summary) return null;
+    return {
+      id: `${version}-${index}`,
+      version,
+      date,
+      headline,
+      summary,
+      details,
+    };
+  };
+
+  const normalizeChangelogData = (value) => {
+    const raw = value && typeof value === "object" ? value : {};
+    const releasesRaw = Array.isArray(raw?.releases) ? raw.releases : [];
+    const releaseMap = new Map();
+    const releases = [];
+    for (const [index, entry] of releasesRaw.entries()) {
+      const normalized = normalizeChangelogRelease(entry, index);
+      if (!normalized) continue;
+      if (releaseMap.has(normalized.version)) continue;
+      releaseMap.set(normalized.version, normalized);
+      releases.push(normalized);
+    }
+    return createEmptyChangelogData({
+      version: readNumeric(raw?.version) ?? 1,
+      releases,
+      releaseMap,
+    });
+  };
+
+  const getCurrentExtensionVersion = () => readExtensionMetadata().version;
+
+  const findChangelogReleaseForVersion = (changelog, version) => {
+    const normalizedVersion = sanitizeDisplayText(version);
+    if (!normalizedVersion) return null;
+    if (changelog?.releaseMap instanceof Map) {
+      return changelog.releaseMap.get(normalizedVersion) ?? null;
+    }
+    const releases = Array.isArray(changelog?.releases) ? changelog.releases : [];
+    return (
+      releases.find(
+        (entry) =>
+          sanitizeDisplayText(entry?.version) === normalizedVersion,
+      ) ?? null
+    );
+  };
+
+  const getChangelogData = async ({ force = false } = {}) => {
+    if (!force && changelogCache) return changelogCache;
+    if (!force && changelogInFlight) return changelogInFlight;
+
+    changelogInFlight = (async () => {
+      const metadata = readExtensionMetadata();
+      if (!metadata?.changelogUrl) {
+        const empty = createEmptyChangelogData({
+          loadError: "Missing extension changelog URL",
+        });
+        changelogCache = empty;
+        return empty;
+      }
+
+      try {
+        const response = await fetch(metadata.changelogUrl, {
+          cache: "no-store",
+        });
+        if (!response?.ok) {
+          throw new Error(
+            `Changelog request failed (${response?.status ?? "unknown"})`,
+          );
+        }
+        const raw = await response.json();
+        const normalized = normalizeChangelogData(raw);
+        changelogCache = normalized;
+        return normalized;
+      } catch (error) {
+        log("debug", "[EA Data] Failed to load changelog", {
+          error,
+          url: metadata?.changelogUrl ?? null,
+        });
+        const fallback = createEmptyChangelogData({
+          loadError: error?.message ?? String(error),
+        });
+        changelogCache = fallback;
+        return fallback;
+      }
+    })().finally(() => {
+      changelogInFlight = null;
+    });
+
+    return changelogInFlight;
+  };
+
+  const getReleaseNotesStateFromPreferences = (prefs) =>
+    normalizeReleaseNotesState(prefs?.nux?.releaseNotes);
+
+  const markReleaseNotesVersionSeen = async (
+    version,
+    { seenAt = Date.now() } = {},
+  ) => {
+    const normalizedVersion = sanitizeDisplayText(version);
+    if (!normalizedVersion) return null;
+    const changelog = await getChangelogData();
+    if (!findChangelogReleaseForVersion(changelog, normalizedVersion)) {
+      return null;
+    }
+
+    const prefs = await getPreferences();
+    const currentState = getReleaseNotesStateFromPreferences(prefs);
+    const nextSeenAt = readNumeric(seenAt) ?? Date.now();
+    if (
+      currentState?.lastSeenVersion === normalizedVersion &&
+      currentState?.lastSeenAt != null
+    ) {
+      return prefs;
+    }
+
+    const next = clonePlainObject(prefs);
+    if (!next.nux || typeof next.nux !== "object") next.nux = {};
+    next.nux.releaseNotes = {
+      lastSeenVersion: normalizedVersion,
+      lastSeenAt: nextSeenAt,
+    };
+    return savePreferences(next);
+  };
+
+  const shouldAutoOpenReleaseNotes = ({
+    prefs = null,
+    changelog = null,
+    currentVersion = null,
+  } = {}) => {
+    const version = sanitizeDisplayText(currentVersion) ?? getCurrentExtensionVersion();
+    if (!version) return false;
+    if (!findChangelogReleaseForVersion(changelog, version)) return false;
+    const seenState = getReleaseNotesStateFromPreferences(prefs);
+    return sanitizeDisplayText(seenState?.lastSeenVersion) !== version;
+  };
+
   const splitSettingPath = (path) =>
     String(path ?? "")
       .split(".")
@@ -20360,11 +21255,16 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             activePlanId: null,
             plans: [],
           };
+    const rawNux = raw?.nux && typeof raw.nux === "object" ? raw.nux : {};
+    const releaseNotes = normalizeReleaseNotesState(rawNux?.releaseNotes);
 
     return {
-      version: 3,
+      version: 4,
       global,
       perChallenge,
+      nux: {
+        releaseNotes,
+      },
       solver: {
         features: {
           sequenceV1: rawSolverFeatures?.sequenceV1 !== false,
@@ -23009,6 +23909,36 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     return true;
   };
 
+  const hookHomeHubViewController = () => {
+    if (homeHubControllerHooked) return true;
+    if (typeof UTHomeHubViewController === "undefined") return false;
+    const proto = UTHomeHubViewController.prototype;
+    if (!proto || proto.__eaDataHomeHubControllerHooked) return true;
+    const originalViewDidAppear = proto.viewDidAppear;
+    if (typeof originalViewDidAppear !== "function") return false;
+
+    proto.viewDidAppear = function (...args) {
+      const result = originalViewDidAppear.call(this, ...args);
+      try {
+        void tryAutoOpenWhatsNewFromHomeHub("home-viewDidAppear");
+      } catch {}
+      return result;
+    };
+
+    proto.__eaDataHomeHubControllerHooked = true;
+    homeHubControllerHooked = true;
+    console.log("[EA Data] Home hub controller hook installed");
+
+    try {
+      const currentController = getCurrentEaController();
+      if (currentController instanceof UTHomeHubViewController) {
+        void tryAutoOpenWhatsNewFromHomeHub("home-hook-installed-current");
+      }
+    } catch {}
+
+    return true;
+  };
+
   const hookGameRewardsView = () => {
     if (gameRewardsHooked) return true;
     if (typeof UTGameRewardsView === "undefined") return false;
@@ -23723,6 +24653,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
   const areAppSettingsHooksReady = () =>
     appSettingsHooked && appSettingsControllerHooked;
 
+  const areHomeHooksReady = () => homeHubControllerHooked;
+
   const startSbcHookPolling = () => {
     if (areSbcHooksReady()) return;
     if (sbcHookPollingIntervalId != null) return;
@@ -23797,9 +24729,32 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     }, 500);
   };
 
+  const startHomeHookPolling = () => {
+    if (areHomeHooksReady()) return;
+    if (homeHookPollingIntervalId != null) return;
+    const startedAt = Date.now();
+    const maxWaitMs = 30000;
+    homeHookPollingIntervalId = setInterval(() => {
+      const controllerReady = hookHomeHubViewController();
+      if (Date.now() - startedAt > maxWaitMs) {
+        clearInterval(homeHookPollingIntervalId);
+        homeHookPollingIntervalId = null;
+        log("debug", "[EA Data] Home hub hook polling timed out", {
+          controllerReady,
+        });
+        return;
+      }
+      if (controllerReady) {
+        clearInterval(homeHookPollingIntervalId);
+        homeHookPollingIntervalId = null;
+      }
+    }, 500);
+  };
+
   const retryDeferredHookPolling = () => {
     startSbcHookPolling();
     startAppSettingsHookPolling();
+    startHomeHookPolling();
     if (sbcHubHooked) ensureSequenceHubEntry(currentSbcHubView ?? null);
   };
 
@@ -24141,6 +25096,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 
   startSbcHookPolling();
   startAppSettingsHookPolling();
+  startHomeHookPolling();
   try {
     startTopbarSupportHookPolling();
   } catch (error) {
@@ -24156,6 +25112,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
   window.eaData = {
     openSequenceSolver: () => openSequenceSolveOverlay(),
     openSequencePlanner: () => openSequenceSolveOverlay(),
+    openWhatsNew: () => openWhatsNewOverlay({ source: "manual" }),
+    openChangelog: () => openWhatsNewOverlay({ source: "manual" }),
     getClubPlayers: (options) =>
       sendToPage("EA_DATA_GET_CLUB_PLAYERS", options).then((data) =>
         logResult("Club players", data),
