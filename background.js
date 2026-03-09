@@ -2,6 +2,9 @@ const SOLVER_BRIDGE_REQUEST = "EA_SOLVER_REQUEST";
 const SOLVER_PORT_NAME = "EA_SOLVER_PORT";
 const WORKER_RESPONSE = "SOLVER_WORKER_RESPONSE";
 const BRIDGE_INJECT_REQUEST = "EA_PAGE_BRIDGE_INJECT";
+const ALLOWED_BRIDGE_INJECT_PATHS = new Set(["page/ea-data-bridge.js"]);
+const EA_WEBAPP_URL_RE =
+  /^https:\/\/www\.ea\.com(?:\/[^/?#]+)?\/ea-sports-fc\/ultimate-team\/web-app(?:\/|$)/i;
 import {
   buildSolverContext,
   solveSquad,
@@ -63,16 +66,26 @@ const handleBridgeInjectRequest = async (message, sender, sendResponse) => {
     Number.isInteger(sender?.frameId) && sender.frameId >= 0
       ? sender.frameId
       : 0;
+  const senderUrl = String(sender?.tab?.url || sender?.url || "");
 
   try {
     if (tabId == null) {
       throw new Error("Missing sender tab id");
     }
+    if (!ALLOWED_BRIDGE_INJECT_PATHS.has(path)) {
+      throw new Error("Bridge path not allowed");
+    }
+    if (frameId !== 0) {
+      throw new Error("Bridge injection only allowed in top frame");
+    }
+    if (!EA_WEBAPP_URL_RE.test(senderUrl)) {
+      throw new Error("Bridge injection not allowed for this page");
+    }
     if (!chrome?.scripting?.executeScript) {
       throw new Error("chrome.scripting.executeScript is unavailable");
     }
     await chrome.scripting.executeScript({
-      target: { tabId, frameIds: [frameId] },
+      target: { tabId, frameIds: [0] },
       files: [path],
       world: "MAIN",
     });
@@ -82,7 +95,8 @@ const handleBridgeInjectRequest = async (message, sender, sendResponse) => {
         injected: true,
         path,
         tabId,
-        frameId,
+        frameId: 0,
+        senderUrl: senderUrl || null,
       },
     });
   } catch (error) {
@@ -94,6 +108,7 @@ const handleBridgeInjectRequest = async (message, sender, sendResponse) => {
         path,
         tabId: tabId ?? null,
         frameId,
+        senderUrl: senderUrl || null,
       },
     });
   }

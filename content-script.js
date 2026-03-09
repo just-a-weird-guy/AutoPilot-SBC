@@ -130,6 +130,7 @@ const EA_DATA_LOG = "EA_DATA_LOG";
 const PREF_BRIDGE_GET = "EA_DATA_PREF_GET";
 const PREF_BRIDGE_SET = "EA_DATA_PREF_SET";
 const PREF_BRIDGE_RES = "EA_DATA_PREF_RES";
+const PREF_ALLOWED_KEYS = new Set(["eaData.preferences.v1"]);
 
 // Relay page-world log messages to the content-script console.
 // The page script (ea-data-bridge.js) runs in the main world where EA overrides
@@ -137,6 +138,8 @@ const PREF_BRIDGE_RES = "EA_DATA_PREF_RES";
 window.addEventListener(
   "message",
   (event) => {
+    if (window !== window.top) return;
+    if (!isTrustedPageMessageEvent(event)) return;
     if (event?.data?.type !== EA_DATA_LOG) return;
     const args = event.data.args;
     if (!Array.isArray(args)) return;
@@ -158,8 +161,21 @@ const createRequestId = () => {
   return `ea-data-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
+const isTrustedPageMessageEvent = (event) => {
+  if (!event) return false;
+  if (event.source !== window) return false;
+  try {
+    const expectedOrigin = window.location?.origin ?? "";
+    const origin = event.origin;
+    if (origin && origin !== "null" && expectedOrigin && origin !== expectedOrigin) {
+      return false;
+    }
+  } catch {}
+  return true;
+};
+
 const postSolverTrace = (stage, requestId, details = null) => {
-  const detail = { type: SOLVER_BRIDGE_TRACE, requestId, stage, details };
+  const detail = { type: SOLVER_BRIDGE_TRACE, requestId, stage, details, source: SOLVER_BRIDGE_SOURCE };
   try {
     window.postMessage(detail, "*");
   } catch {}
@@ -185,6 +201,7 @@ const postSolverPong = (requestId) => {
     requestId,
     frame: window === window.top ? "top" : "child",
     href: location.href,
+    source: SOLVER_BRIDGE_SOURCE,
   };
   try {
     window.postMessage(detail, "*");
@@ -194,7 +211,7 @@ const postSolverPong = (requestId) => {
   } catch {}
 };
 
-markListenerReady();
+if (window === window.top) markListenerReady();
 
 const ensureSolverPort = () => {
   if (solverPort) return solverPort;
@@ -338,9 +355,10 @@ const handleSolverError = (error) => {
 };
 
 const handleSolverBridgeRequest = async (data) => {
+  if (window !== window.top) return;
   const { type, requestId, payload, source } = data || {};
   if (type !== SOLVER_BRIDGE_REQUEST || !requestId) return;
-  if (source && source !== SOLVER_BRIDGE_SOURCE) return;
+  if (source !== SOLVER_BRIDGE_SOURCE) return;
   if (solverBridgeSeen.has(requestId)) return;
   solverBridgeSeen.add(requestId);
   // Prevent unbounded growth if the user runs many solves in a single session.
@@ -376,6 +394,7 @@ const handleSolverBridgeRequest = async (data) => {
       requestId,
       ok: true,
       data: result,
+      source: SOLVER_BRIDGE_SOURCE,
     };
     postSolverTrace("responded", requestId, { ok: true });
     window.postMessage(responsePayload, "*");
@@ -388,6 +407,7 @@ const handleSolverBridgeRequest = async (data) => {
       type: SOLVER_BRIDGE_RESPONSE,
       requestId,
       ok: false,
+      source: SOLVER_BRIDGE_SOURCE,
       error: normalized?.code
         ? normalized
         : {
@@ -461,14 +481,22 @@ const postPrefResponse = (requestId, ok, data, error) => {
 };
 
 const handlePrefBridgeRequest = async (data) => {
+  if (window !== window.top) return;
   const { type, requestId, source, key, value } = data || {};
   if (type !== PREF_BRIDGE_GET && type !== PREF_BRIDGE_SET) return;
   if (!requestId) return;
-  if (source && source !== SOLVER_BRIDGE_SOURCE) return;
+  if (source !== SOLVER_BRIDGE_SOURCE) return;
   if (!key) {
     postPrefResponse(requestId, false, null, {
       code: "PREF_INVALID",
       message: "Missing preference key",
+    });
+    return;
+  }
+  if (!PREF_ALLOWED_KEYS.has(String(key))) {
+    postPrefResponse(requestId, false, null, {
+      code: "PREF_FORBIDDEN_KEY",
+      message: "Preference key not allowed",
     });
     return;
   }
@@ -492,6 +520,8 @@ const handlePrefBridgeRequest = async (data) => {
 window.addEventListener(
   "message",
   (event) => {
+    if (window !== window.top) return;
+    if (!isTrustedPageMessageEvent(event)) return;
     handleSolverBridgeRequest(event.data);
   },
   true,
@@ -500,16 +530,21 @@ window.addEventListener(
 window.addEventListener(
   "message",
   (event) => {
+    if (window !== window.top) return;
+    if (!isTrustedPageMessageEvent(event)) return;
     handlePrefBridgeRequest(event.data);
   },
   true,
 );
 
 document.addEventListener(SOLVER_BRIDGE_REQUEST, (event) => {
+  if (window !== window.top) return;
   handleSolverBridgeRequest(event.detail);
 });
 
 document.addEventListener(SOLVER_BRIDGE_PING, (event) => {
+  if (window !== window.top) return;
+  if (event?.detail?.source !== SOLVER_BRIDGE_SOURCE) return;
   const requestId = event?.detail?.requestId || createRequestId();
   postSolverTrace("ping-received", requestId, { channel: "event" });
   postSolverPong(requestId);
@@ -518,6 +553,9 @@ document.addEventListener(SOLVER_BRIDGE_PING, (event) => {
 window.addEventListener(
   "message",
   (event) => {
+    if (window !== window.top) return;
+    if (!isTrustedPageMessageEvent(event)) return;
+    if (event?.data?.source !== SOLVER_BRIDGE_SOURCE) return;
     if (event?.data?.type !== SOLVER_BRIDGE_PING) return;
     const requestId = event?.data?.requestId || createRequestId();
     postSolverTrace("ping-received", requestId, { channel: "postMessage" });
