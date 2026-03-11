@@ -5103,6 +5103,8 @@ let currencyNavBarHooked = false;
   color: rgba(255, 216, 120, 0.9);
 }
 .ea-data-sequence-step-badge[data-status="running"],
+.ea-data-sequence-step-badge[data-status="refreshing"],
+.ea-data-sequence-step-badge[data-status="loading"],
 .ea-data-sequence-step-badge[data-status="resolving"],
 .ea-data-sequence-step-badge[data-status="solving"],
 .ea-data-sequence-step-badge[data-status="applying"],
@@ -16833,6 +16835,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       if (text === "waiting") return "waiting";
       if (text === "running") return "running";
       if (
+        text === "refreshing" ||
+        text === "loading" ||
         text === "resolving" ||
         text === "solving" ||
         text === "applying" ||
@@ -18399,8 +18403,22 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       };
     };
 
-    const executeDescriptor = async (descriptor, step, runContext) => {
+    const executeDescriptor = async (
+      descriptor,
+      step,
+      runContext,
+      { onPhaseChange = null } = {},
+    ) => {
       const shouldAbort = () => Boolean(sequenceSolveOverlayState?.abortRequested);
+      const challengeName = descriptor?.challengeName ?? "Challenge";
+      const notifyPhase = (phase, message) => {
+        if (typeof onPhaseChange !== "function") return;
+        try {
+          onPhaseChange(phase, message);
+        } catch {}
+      };
+
+      notifyPhase("refreshing", `Refreshing ${challengeName}...`);
       const challengeEntity = await getChallengeEntityForSubmission(
         descriptor?.setId,
         descriptor?.challengeId,
@@ -18410,29 +18428,64 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         return {
           status: "skipped",
           code: "STEP_DATA_STALE",
-          message: `${descriptor?.challengeName ?? "Challenge"} is no longer available.`,
+          message: `${challengeName} is no longer available.`,
         };
       }
 
-      const loaded = await loadChallenge(challengeEntity, true, {
-        force: true,
-      });
-      const snapshot = buildRequirementsSnapshot(
-        challengeEntity,
-        loaded?.data ?? loaded,
-      );
-      const slotInfo = buildChallengeSlotsForSolver(
-        challengeEntity,
-        loaded?.data ?? loaded,
-      );
-      if (
-        !Array.isArray(slotInfo?.squadSlots) ||
-        !slotInfo.squadSlots.length
-      ) {
+      const prefetchedRequirementsById =
+        getPrefetchedSetRequirementsByChallengeId(descriptor?.setId) ?? null;
+      const prefetched =
+        prefetchedRequirementsById?.get?.(String(challengeEntity?.id ?? "")) ??
+        prefetchedRequirementsById?.get?.(String(descriptor?.challengeId ?? "")) ??
+        null;
+      let snapshot =
+        prefetched?.snapshot && typeof prefetched.snapshot === "object"
+          ? prefetched.snapshot
+          : buildRequirementsSnapshot(challengeEntity, null);
+      let slotInfo = buildChallengeSlotsForSolver(challengeEntity, null);
+      const localRequirements = extractRequirements(challengeEntity);
+      const hasUsableSnapshot =
+        Boolean(prefetched?.snapshot && typeof prefetched.snapshot === "object") ||
+        (Array.isArray(localRequirements)
+          ? localRequirements.length > 0
+          : Array.isArray(snapshot?.requirementsNormalized) &&
+            snapshot.requirementsNormalized.length > 0);
+      let hasUsableSlots =
+        Array.isArray(slotInfo?.squadSlots) && slotInfo.squadSlots.length > 0;
+
+      if (!hasUsableSnapshot || !hasUsableSlots) {
+        notifyPhase("loading", `Loading ${challengeName}...`);
+        const loaded = await loadChallenge(challengeEntity, true, {
+          force: true,
+        });
+        snapshot = buildRequirementsSnapshot(
+          challengeEntity,
+          loaded?.data ?? loaded,
+        );
+        slotInfo = buildChallengeSlotsForSolver(
+          challengeEntity,
+          loaded?.data ?? loaded,
+        );
+        hasUsableSlots =
+          Array.isArray(slotInfo?.squadSlots) && slotInfo.squadSlots.length > 0;
+        if (challengeEntity?.id != null) {
+          upsertPrefetchedSetRequirement(descriptor?.setId, challengeEntity.id, {
+            challengeId: String(challengeEntity.id),
+            challengeName,
+            snapshot,
+            source: "snapshot-loaded",
+            status: "ready",
+            updatedAt: Date.now(),
+            errorMessage: null,
+          });
+        }
+      }
+
+      if (!hasUsableSlots) {
         return {
           status: "skipped",
           code: "STEP_DATA_STALE",
-          message: `${descriptor?.challengeName ?? "Challenge"} has no usable squad slots.`,
+          message: `${challengeName} has no usable squad slots.`,
         };
       }
 
@@ -18483,6 +18536,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           .filter(Boolean),
       );
 
+      notifyPhase("solving", `Solving ${challengeName}...`);
       const solveResult = await callSolveBridge(
         {
           players: filteredPlayers,
@@ -18531,6 +18585,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         };
       }
 
+      notifyPhase("applying", `Applying ${challengeName}...`);
       await applySolutionWithSelectedMode(challengeEntity, solutionIds, {
         lookupKey: "id",
         slotSolution: solveResult?.solutionSlots?.[0] ?? null,
@@ -18539,10 +18594,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         preHydratedChallenge: true,
       });
       await delayMs(jitterMs(350, 0.35));
+
+      notifyPhase("submitting", `Submitting ${challengeName}...`);
       const submitResult = await submitSbcChallenge(challengeEntity);
       if (!submitResult?.success) {
         throw new Error(
-          `${descriptor?.challengeName ?? "Challenge"} submit failed (${submitResult?.error ?? submitResult?.status ?? "unknown"}).`,
+          `${challengeName} submit failed (${submitResult?.error ?? submitResult?.status ?? "unknown"}).`,
         );
       }
 
@@ -18562,7 +18619,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       return {
         status: "solved",
         code: "SOLVED",
-        message: `${descriptor?.challengeName ?? "Challenge"} submitted successfully.`,
+        message: `${challengeName} submitted successfully.`,
       };
     };
 
@@ -18776,24 +18833,27 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   break planLoop;
                 }
 
-                updateRunStep(step.id, {
-                  status: "solving",
-                  message:
-                    stepLoopCount > 1
-                      ? `Solving ${descriptor?.challengeName ?? "challenge"} (loop ${stepLoopPass}/${stepLoopCount})...`
-                      : `Solving ${descriptor?.challengeName ?? "challenge"}...`,
-                });
-                setRuntimeStatus(
-                  stepLoopCount > 1
-                    ? `Solving ${descriptor?.challengeName ?? "challenge"} (${stepLoopPass}/${stepLoopCount})...`
-                    : `Solving ${descriptor?.challengeName ?? "challenge"}...`,
-                );
-
                 try {
                   const outcome = await executeDescriptor(
                     descriptor,
                     step,
                     runContext,
+                    {
+                      onPhaseChange: (phase, message) => {
+                        const baseMessage =
+                          sanitizeDisplayText(message) ??
+                          `${phase} ${descriptor?.challengeName ?? "challenge"}...`;
+                        const displayMessage =
+                          stepLoopCount > 1
+                            ? `${baseMessage.replace(/\.{3}$/, "")} (${stepLoopPass}/${stepLoopCount})...`
+                            : baseMessage;
+                        updateRunStep(step.id, {
+                          status: phase,
+                          message: displayMessage,
+                        });
+                        setRuntimeStatus(displayMessage);
+                      },
+                    },
                   );
                   if (outcome?.status === "solved") {
                     bumpRunCounters("solved", step.id);
