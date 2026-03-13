@@ -380,7 +380,10 @@
     const key = String(lookupKey ?? "id");
     if (cache.lookupKey !== key) return null;
     const at = Number(cache.at ?? 0);
-    if (!Number.isFinite(at) || Date.now() - at > APPLY_LOOKUP_WARM_CACHE_TTL_MS) {
+    if (
+      !Number.isFinite(at) ||
+      Date.now() - at > APPLY_LOOKUP_WARM_CACHE_TTL_MS
+    ) {
       return null;
     }
     const lookup = cache.lookup;
@@ -3873,14 +3876,14 @@
   let sbcHubHooked = false;
   let gameRewardsHooked = false;
   let itemDetailsControllerHooked = false;
-let slotActionPanelHooked = false;
-let appSettingsHooked = false;
-let appSettingsControllerHooked = false;
-let homeHubControllerHooked = false;
-let sbcHookPollingIntervalId = null;
-let appSettingsHookPollingIntervalId = null;
-let homeHookPollingIntervalId = null;
-let currencyNavBarHooked = false;
+  let slotActionPanelHooked = false;
+  let appSettingsHooked = false;
+  let appSettingsControllerHooked = false;
+  let homeHubControllerHooked = false;
+  let sbcHookPollingIntervalId = null;
+  let appSettingsHookPollingIntervalId = null;
+  let homeHookPollingIntervalId = null;
+  let currencyNavBarHooked = false;
   let currentChallenge = null;
   let lastOpenedChallengeId = null;
   let lastOpenedSetId = null;
@@ -5336,23 +5339,28 @@ let currencyNavBarHooked = false;
 .ea-data-sequence-progress {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.2);
+  overflow: hidden;
 }
 .ea-data-sequence-progress-meta {
   display: flex;
   justify-content: space-between;
   gap: 10px;
+  padding: 10px 14px 0;
   color: rgba(200, 200, 210, 0.55);
   font-size: 11px;
   font-weight: 700;
 }
 .ea-data-sequence-progress-track {
   position: relative;
-  height: 10px;
+  height: 6px;
+  margin: 8px 14px 0;
   border-radius: 999px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.06);
 }
 .ea-data-sequence-progress-fill {
   position: absolute;
@@ -5360,9 +5368,35 @@ let currencyNavBarHooked = false;
   width: var(--progress-pct, 0%);
   border-radius: inherit;
   background:
-    linear-gradient(90deg, rgba(255, 177, 61, 0.92), rgba(255, 120, 32, 0.88));
-  box-shadow: 0 0 18px rgba(255, 166, 52, 0.28);
-  transition: width 180ms ease;
+    linear-gradient(90deg, rgba(255, 180, 60, 0.95), rgba(255, 130, 30, 0.9));
+  box-shadow: 0 0 12px rgba(255, 160, 50, 0.3);
+  transition: width 350ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ea-data-sequence-progress-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.25) 0%, transparent 100%);
+}
+.ea-data-sequence-progress-status {
+  padding: 8px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ea-data-sequence-progress-status-primary {
+  color: rgba(255, 200, 100, 0.92);
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.1px;
+  line-height: 1.4;
+}
+.ea-data-sequence-progress-status-secondary {
+  color: rgba(200, 200, 210, 0.45);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
 }
 .ea-data-sequence-run-badge {
   min-height: 26px;
@@ -6126,25 +6160,29 @@ let currencyNavBarHooked = false;
   letter-spacing: 0.2px;
 }
 .ea-data-settings-close {
-  border: none;
-  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
   cursor: pointer;
   padding: 0;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
-  color: rgba(255, 255, 255, 0.70);
-  font-size: 18px;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 20px;
   line-height: 1;
-  border-radius: 6px;
+  border-radius: 8px;
+  transition: color 180ms ease, background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 .ea-data-settings-close:hover {
-  color: rgba(255, 255, 255, 0.95);
-  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+  background: rgba(200, 50, 50, 0.35);
+  border-color: rgba(255, 100, 100, 0.4);
+  box-shadow: 0 0 14px rgba(255, 80, 80, 0.15);
 }
 .ea-data-settings-close:active {
-  transform: translateY(1px);
+  transform: scale(0.93);
+  background: rgba(200, 50, 50, 0.45);
 }
 .ea-data-whats-new-overlay {
   position: fixed;
@@ -8132,16 +8170,23 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     }
 
     const releaseList = overlay.querySelector("#ea-data-whats-new-list");
-    const versionBadge = overlay.querySelector("#ea-data-whats-new-version-badge");
+    const versionBadge = overlay.querySelector(
+      "#ea-data-whats-new-version-badge",
+    );
     const subtitleEl = overlay.querySelector("#ea-data-whats-new-subtitle");
-    const footerCopyEl = overlay.querySelector("#ea-data-whats-new-footer-copy");
+    const footerCopyEl = overlay.querySelector(
+      "#ea-data-whats-new-footer-copy",
+    );
 
     const render = () => {
       const changelog =
-        whatsNewOverlayState?.changelog && typeof whatsNewOverlayState.changelog === "object"
+        whatsNewOverlayState?.changelog &&
+        typeof whatsNewOverlayState.changelog === "object"
           ? whatsNewOverlayState.changelog
           : createEmptyChangelogData();
-      const releases = Array.isArray(changelog?.releases) ? changelog.releases : [];
+      const releases = Array.isArray(changelog?.releases)
+        ? changelog.releases
+        : [];
       const currentVersion =
         sanitizeDisplayText(whatsNewOverlayState?.currentVersion) ??
         getCurrentExtensionVersion();
@@ -8149,7 +8194,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         changelog,
         currentVersion,
       );
-      const source = whatsNewOverlayState?.source === "auto" ? "auto" : "manual";
+      const source =
+        whatsNewOverlayState?.source === "auto" ? "auto" : "manual";
       const expandedVersion =
         sanitizeDisplayText(whatsNewOverlayState?.expandedVersion) ??
         currentRelease?.version ??
@@ -8194,15 +8240,16 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           const isCurrent =
             sanitizeDisplayText(currentVersion) ===
             sanitizeDisplayText(release?.version);
-          const detailsHtml = Array.isArray(release?.details) && release.details.length
-            ? `
+          const detailsHtml =
+            Array.isArray(release?.details) && release.details.length
+              ? `
               <ul class="ea-data-whats-new-release-details">
                 ${release.details
                   .map((detail) => `<li>${escapeUiText(detail)}</li>`)
                   .join("")}
               </ul>
             `
-            : "";
+              : "";
           return `
             <article class="ea-data-whats-new-release${isExpanded ? " is-expanded" : ""}${isCurrent ? " is-current" : ""}" data-release-version="${escapeUiText(release.version)}">
               <button type="button" class="ea-data-whats-new-release-toggle" data-release-toggle="${escapeUiText(release.version)}" aria-expanded="${isExpanded ? "true" : "false"}">
@@ -8256,7 +8303,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         }
         return;
       }
-      const action = sanitizeDisplayText(actionEl?.getAttribute?.("data-action"));
+      const action = sanitizeDisplayText(
+        actionEl?.getAttribute?.("data-action"),
+      );
       if (!action) return;
       if (
         action === "close" ||
@@ -8311,7 +8360,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const appMain = getAppMain();
       const rootController = appMain?.getRootViewController?.() ?? null;
       const presentedController =
-        rootController?.getPresentedViewController?.() ?? rootController ?? null;
+        rootController?.getPresentedViewController?.() ??
+        rootController ??
+        null;
       const currentViewController =
         presentedController?.getCurrentViewController?.() ??
         presentedController ??
@@ -9763,9 +9814,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     if (!sequenceSolveOverlayState?.running) return false;
     sequenceSolveOverlayState.abortRequested = true;
     try {
-      if (
-        typeof sequenceSolveOverlayState?.setRuntimeStatus === "function"
-      ) {
+      if (typeof sequenceSolveOverlayState?.setRuntimeStatus === "function") {
         sequenceSolveOverlayState.setRuntimeStatus(statusText);
       }
     } catch {}
@@ -9946,8 +9995,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         ? readNumeric(setLike?.id ?? null)
         : readNumeric(setLike);
     if (setId == null) return null;
-    const rawSet =
-      typeof setLike === "object" && setLike ? setLike : null;
+    const rawSet = typeof setLike === "object" && setLike ? setLike : null;
     const repoSet = getSbcSetMetaById(setId) ?? getSbcSetById(setId) ?? null;
     const resolvedSet = repoSet ?? rawSet;
     const repeatability = getSbcSetRepeatabilityInfo(setId, {
@@ -10563,7 +10611,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         challenge?.squad ??
         loaded?.data?.squad ??
         loaded?.squad ??
-        (typeof challenge?.getSquad === "function" ? challenge.getSquad() : null);
+        (typeof challenge?.getSquad === "function"
+          ? challenge.getSquad()
+          : null);
     } catch {}
 
     if (!squad) {
@@ -11908,15 +11958,17 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 
           const sol = solutions[i];
           setStatus(`(${i + 1}/${solutions.length}) Applying players...`);
-          await applySolutionWithSelectedMode(challengeEntity, sol.solutionIds, {
-            lookupKey: "id",
-            slotSolution: sol.slotSolution ?? null,
-            playerById: multiSolveOverlayState?.playerById ?? null,
-            preserveExistingValid: false,
-          });
-          if (!(
-            await delayAbortable(jitterMs(350, 0.35), shouldAbort)
-          )) {
+          await applySolutionWithSelectedMode(
+            challengeEntity,
+            sol.solutionIds,
+            {
+              lookupKey: "id",
+              slotSolution: sol.slotSolution ?? null,
+              playerById: multiSolveOverlayState?.playerById ?? null,
+              preserveExistingValid: false,
+            },
+          );
+          if (!(await delayAbortable(jitterMs(350, 0.35), shouldAbort))) {
             multiSolveOverlayState.abortRequested = true;
             break;
           }
@@ -11949,9 +12001,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           });
 
           setStatus(`(${i + 1}/${solutions.length}) Cooling down...`);
-          if (!(
-            await delayAbortable(jitterMs(4500, 0.35), shouldAbort)
-          )) {
+          if (!(await delayAbortable(jitterMs(4500, 0.35), shouldAbort))) {
             multiSolveOverlayState.abortRequested = true;
             break;
           }
@@ -15838,12 +15888,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   preHydratedChallenge: true,
                 },
               );
-              if (!(
-                await delayAbortable(
-                  jitterMs(350, 0.35),
-                  () => Boolean(setSolveOverlayState.abortRequested),
-                )
-              )) {
+              if (
+                !(await delayAbortable(jitterMs(350, 0.35), () =>
+                  Boolean(setSolveOverlayState.abortRequested),
+                ))
+              ) {
                 setSolveOverlayState.abortRequested = true;
                 break;
               }
@@ -15888,9 +15937,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   ? `(Cycle ${batch.cycleIndex}) (${i + 1}/${batchEntries.length}) Cooling down...`
                   : `(${i + 1}/${batchEntries.length}) Cooling down...`,
               );
-              if (!(
-                await delayAbortable(jitterMs(4500, 0.35), shouldAbort)
-              )) {
+              if (!(await delayAbortable(jitterMs(4500, 0.35), shouldAbort))) {
                 setSolveOverlayState.abortRequested = true;
                 break;
               }
@@ -16033,12 +16080,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                       preHydratedChallenge: true,
                     },
                   );
-                  if (!(
-                    await delayAbortable(
-                      jitterMs(350, 0.35),
-                      () => Boolean(setSolveOverlayState.abortRequested),
-                    )
-                  )) {
+                  if (
+                    !(await delayAbortable(jitterMs(350, 0.35), () =>
+                      Boolean(setSolveOverlayState.abortRequested),
+                    ))
+                  ) {
                     setSolveOverlayState.abortRequested = true;
                     break;
                   }
@@ -16073,9 +16119,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                       ? `(Cycle ${batch.cycleIndex}) (${i + 1}/${batchEntries.length}) Cooling down...`
                       : `(${i + 1}/${batchEntries.length}) Cooling down...`,
                   );
-                  if (!(
-                    await delayAbortable(jitterMs(4500, 0.35), shouldAbort)
-                  )) {
+                  if (
+                    !(await delayAbortable(jitterMs(4500, 0.35), shouldAbort))
+                  ) {
                     setSolveOverlayState.abortRequested = true;
                     break;
                   }
@@ -16172,12 +16218,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             c < cycleBatches.length - 1 &&
             !setSolveOverlayState.abortRequested
           ) {
-            if (!(
-              await delayAbortable(
-                jitterMs(2000, 0.3),
-                () => Boolean(setSolveOverlayState.abortRequested),
-              )
-            )) {
+            if (
+              !(await delayAbortable(jitterMs(2000, 0.3), () =>
+                Boolean(setSolveOverlayState.abortRequested),
+              ))
+            ) {
               setSolveOverlayState.abortRequested = true;
               break;
             }
@@ -16764,9 +16809,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       </div>
     `;
 
-
     if (!existing) document.body.appendChild(overlay);
-
 
     const modal = overlay.querySelector(".ea-data-sequence-modal");
     const newBtn = overlay.querySelector("#ea-data-sequence-new-btn");
@@ -16774,19 +16817,30 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const saveBtn = overlay.querySelector("#ea-data-sequence-save-btn");
     const startBtn = overlay.querySelector("#ea-data-sequence-start-btn");
     const stopBtn = overlay.querySelector("#ea-data-sequence-stop-btn");
-    const addStepFooterBtn = overlay.querySelector("#ea-data-sequence-add-step-footer-btn");
+    const addStepFooterBtn = overlay.querySelector(
+      "#ea-data-sequence-add-step-footer-btn",
+    );
     const planBadgeEl = overlay.querySelector("#ea-data-sequence-plan-badge");
     const runBadgeEl = overlay.querySelector("#ea-data-sequence-run-badge");
-    const sidebarCopyEl = overlay.querySelector("#ea-data-sequence-sidebar-copy");
+    const sidebarCopyEl = overlay.querySelector(
+      "#ea-data-sequence-sidebar-copy",
+    );
     const planListEl = overlay.querySelector("#ea-data-sequence-plan-list");
-    const toolbarStatusEl = overlay.querySelector("#ea-data-sequence-toolbar-status");
-    const toolbarCountEl = overlay.querySelector("#ea-data-sequence-toolbar-count");
+    const toolbarStatusEl = overlay.querySelector(
+      "#ea-data-sequence-toolbar-status",
+    );
+    const toolbarCountEl = overlay.querySelector(
+      "#ea-data-sequence-toolbar-count",
+    );
     const stepsPanelEl = overlay.querySelector("#ea-data-sequence-steps-panel");
-    const settingsPanelEl = overlay.querySelector("#ea-data-sequence-settings-panel");
-    const executionPanelEl = overlay.querySelector("#ea-data-sequence-execution-panel");
+    const settingsPanelEl = overlay.querySelector(
+      "#ea-data-sequence-settings-panel",
+    );
+    const executionPanelEl = overlay.querySelector(
+      "#ea-data-sequence-execution-panel",
+    );
     const tabButtons = overlay.querySelectorAll(".ea-data-sequence-tab");
     const tabPanels = overlay.querySelectorAll(".ea-data-sequence-tab-panel");
-
 
     const escapeHtml = (value) =>
       String(value ?? "")
@@ -16875,7 +16929,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       );
     };
 
-    const ensureExpandedStepForPlan = (plan = null, { preferredStepId = null } = {}) => {
+    const ensureExpandedStepForPlan = (
+      plan = null,
+      { preferredStepId = null } = {},
+    ) => {
       const state = sequenceSolveOverlayState ?? null;
       const activePlan = plan ?? getActivePlan();
       if (!state || !activePlan) return null;
@@ -16893,13 +16950,14 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         return preferredKey;
       }
       const currentKey = sanitizeDisplayText(state.expandedStepId);
-      if (currentKey && steps.some((step) => String(step?.id) === String(currentKey))) {
+      if (
+        currentKey &&
+        steps.some((step) => String(step?.id) === String(currentKey))
+      ) {
         return currentKey;
       }
       const fallbackStep =
-        steps.find((step) => step?.enabled !== false) ??
-        steps[0] ??
-        null;
+        steps.find((step) => step?.enabled !== false) ?? steps[0] ?? null;
       state.expandedStepId = fallbackStep?.id ?? null;
       return state.expandedStepId;
     };
@@ -17023,18 +17081,21 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         return {
           valid: false,
           code: "STEP_SET_STALE",
-          reason: "Selected SBC set is no longer available. Reselect a compatible set.",
+          reason:
+            "Selected SBC set is no longer available. Reselect a compatible set.",
         };
       }
       const requiredShape = getSequenceRequiredSetShapeForKind(target?.kind);
       const actualShape = getSequenceSetShape(
-        setEntry?.setShape ?? getSequenceSetShapeFromCount(setEntry?.challengesCount),
+        setEntry?.setShape ??
+          getSequenceSetShapeFromCount(setEntry?.challengesCount),
       );
       if (actualShape == null) {
         return {
           valid: false,
           code: "STEP_SET_UNKNOWN",
-          reason: "SBC set type could not be verified. Refresh SBC data and recheck this step.",
+          reason:
+            "SBC set type could not be verified. Refresh SBC data and recheck this step.",
         };
       }
       if (actualShape !== requiredShape) {
@@ -17084,7 +17145,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const normalized = readNumeric(setId);
       const sets = getSequenceDiscoveryAllSets();
       return (
-        sets.find((entry) => readNumeric(entry?.id) === normalized)?.name ?? null
+        sets.find((entry) => readNumeric(entry?.id) === normalized)?.name ??
+        null
       );
     };
 
@@ -17109,8 +17171,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               .map((entry) => getSbcSetCatalogEntry(entry))
               .filter((entry) => readNumeric(entry?.id) != null)
               .sort((a, b) =>
-                String(a?.name ?? "").localeCompare(String(b?.name ?? ""),
-              ))
+                String(a?.name ?? "").localeCompare(String(b?.name ?? "")),
+              )
           : [];
         discovery.allSets = catalog;
         discovery.sets = catalog.filter(
@@ -17147,10 +17209,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           if (force) {
             // Bypass all caches and force a server refresh so repeatable
             // sets that momentarily appear complete are still resolved.
-            const raw = await getChallengesBySetIdsRaw(
-              [normalizedSetId],
-              { forceRefresh: true },
-            );
+            const raw = await getChallengesBySetIdsRaw([normalizedSetId], {
+              forceRefresh: true,
+            });
             rawChallenges = sortSetChallengesForSolver(raw);
           } else {
             const prefetched = getPrefetchedSetChallenges(normalizedSetId);
@@ -17230,8 +17291,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 
         const compatibleSets = getCompatibleSetsForKind(step?.target?.kind);
         let setEntry =
-          sets.find((entry) => readNumeric(entry?.id) === readNumeric(step?.target?.setId)) ??
-          null;
+          sets.find(
+            (entry) =>
+              readNumeric(entry?.id) === readNumeric(step?.target?.setId),
+          ) ?? null;
         if (!setEntry && !step?.target?.setId) {
           setEntry = compatibleSets[0] ?? null;
           if (setEntry) {
@@ -17246,7 +17309,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             changed = true;
           }
           const actualShape = getSequenceSetShape(
-            setEntry?.setShape ?? getSequenceSetShapeFromCount(setEntry?.challengesCount),
+            setEntry?.setShape ??
+              getSequenceSetShapeFromCount(setEntry?.challengesCount),
           );
           if (
             actualShape === SEQUENCE_SET_SHAPE_SINGLE &&
@@ -17271,7 +17335,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           (sequenceSolveOverlayState?.plans?.length ?? 0) + 1,
         )}`,
         fallbackSettings:
-          sequenceSolveOverlayState?.defaultSettings ?? getDefaultSolverSettings(),
+          sequenceSolveOverlayState?.defaultSettings ??
+          getDefaultSolverSettings(),
       });
       sequenceSolveOverlayState.plans = [plan];
       sequenceSolveOverlayState.activePlanId = plan.id;
@@ -17298,7 +17363,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           state.tabTransitionTimers = [];
         }
       };
-      if (Array.isArray(state?.tabTransitionTimers) && state.tabTransitionTimers.length) {
+      if (
+        Array.isArray(state?.tabTransitionTimers) &&
+        state.tabTransitionTimers.length
+      ) {
         clearTabTimers();
         tabPanels.forEach((panel) => {
           const key = panel.getAttribute("data-tab-panel");
@@ -17418,11 +17486,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         runState?.planLoopCount ?? 1,
         1,
       );
-      const stepLoopPass = clampInt(
-        runState?.currentStepLoopPass ?? 0,
-        0,
-        SEQUENCE_LOOP_COUNT_MAX,
-      ) ?? 0;
+      const stepLoopPass =
+        clampInt(
+          runState?.currentStepLoopPass ?? 0,
+          0,
+          SEQUENCE_LOOP_COUNT_MAX,
+        ) ?? 0;
       const stepLoopCount = clampSequenceLoopCount(
         runState?.currentStepLoopCount ?? 1,
         1,
@@ -17537,6 +17606,15 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   `${progressPct}%`,
                 )}"></div>
               </div>
+              <div class="ea-data-sequence-progress-status">
+                <div class="ea-data-sequence-progress-status-primary">${escapeHtml(
+                  messages.join(" \u2022 ") ||
+                    "Idle. Configure a plan and start when ready.",
+                )}</div>
+                <div class="ea-data-sequence-progress-status-secondary">${escapeHtml(
+                  progressCopy,
+                )}</div>
+              </div>
             </div>
             <div class="ea-data-sequence-runtime-counters">
               <div class="ea-data-sequence-counter">
@@ -17558,13 +17636,6 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 )}</div>
               </div>
             </div>
-            <div class="ea-data-sequence-runtime-message">${escapeHtml(
-              progressCopy,
-            )}</div>
-            <div class="ea-data-sequence-runtime-message">${escapeHtml(
-              messages.join(" \u2022 ") ||
-                "Idle. Configure a plan and start when ready.",
-            )}</div>
             <div class="ea-data-used-summary">
               <div class="ea-data-used-summary-top">
                 <div class="ea-data-used-summary-title">Submitted Players</div>
@@ -17598,7 +17669,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       }
       const isRunning = Boolean(sequenceSolveOverlayState?.running);
       const planName = sanitizeDisplayText(plan?.name) ?? "Sequence Plan";
-      const planLoops = clampSequenceLoopCount(plan?.policy?.planLoopCount ?? 1, 1);
+      const planLoops = clampSequenceLoopCount(
+        plan?.policy?.planLoopCount ?? 1,
+        1,
+      );
       settingsPanelEl.innerHTML = `
         <div class="ea-data-sequence-surface">
           <div class="ea-data-sequence-surface__head">
@@ -17699,19 +17773,20 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   ? "disabled"
                   : validation.valid && validation.availableNow === false
                     ? "waiting"
-                  : !validation.valid
-                     ? "invalid"
-                     : "ready";
+                    : !validation.valid
+                      ? "invalid"
+                      : "ready";
               const statusKey = runRecord?.status
                 ? normalizeRunStatusKey(runRecord.status)
                 : normalizedStep?.enabled === false
                   ? normalizeRunStatusKey("skipped")
                   : validation.valid && validation.availableNow === false
                     ? normalizeRunStatusKey("waiting")
-                  : !validation.valid
-                     ? "invalid"
-                     : normalizeRunStatusKey("pending");
-              const isExpanded = String(normalizedStep?.id) === String(expandedStepId);
+                    : !validation.valid
+                      ? "invalid"
+                      : normalizeRunStatusKey("pending");
+              const isExpanded =
+                String(normalizedStep?.id) === String(expandedStepId);
               const setOptionsHtml = compatibleSets.length
                 ? [
                     `<option value=""${
@@ -17720,18 +17795,16 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                     ...compatibleSets.map((entry) => {
                       const selected =
                         readNumeric(entry?.id) === readNumeric(target?.setId);
-                      const optionLabel = `${sanitizeDisplayText(
-                        entry?.name,
-                      ) ?? `Set ${entry?.id}`}${
+                      const optionLabel = `${
+                        sanitizeDisplayText(entry?.name) ?? `Set ${entry?.id}`
+                      }${
                         selected && entry?.isCompletable === false
                           ? " (no open work right now)"
                           : ""
                       }`;
                       return `<option value="${escapeHtml(entry?.id)}"${
                         selected ? " selected" : ""
-                      }>${escapeHtml(
-                        optionLabel,
-                      )}</option>`;
+                      }>${escapeHtml(optionLabel)}</option>`;
                     }),
                   ].join("")
                 : '<option value="" selected>No compatible SBC sets found</option>';
@@ -17888,15 +17961,17 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                           <label class="ea-data-sequence-label">Rating Range</label>
                           <div class="ea-data-sequence-range-row">
                             <input class="ea-data-sequence-input" type="number" min="0" max="99" step="1" value="${escapeHtml(
-                              normalizedStep?.settingsSnapshot?.ratingRange?.ratingMin ?? 0,
+                              normalizedStep?.settingsSnapshot?.ratingRange
+                                ?.ratingMin ?? 0,
                             )}" data-step-id="${escapeHtml(
-                            normalizedStep?.id,
-                          )}" data-step-field="ratingMin" ${isRunning ? "disabled" : ""} />
+                              normalizedStep?.id,
+                            )}" data-step-field="ratingMin" ${isRunning ? "disabled" : ""} />
                             <input class="ea-data-sequence-input" type="number" min="0" max="99" step="1" value="${escapeHtml(
-                              normalizedStep?.settingsSnapshot?.ratingRange?.ratingMax ?? 99,
+                              normalizedStep?.settingsSnapshot?.ratingRange
+                                ?.ratingMax ?? 99,
                             )}" data-step-id="${escapeHtml(
-                            normalizedStep?.id,
-                          )}" data-step-field="ratingMax" ${isRunning ? "disabled" : ""} />
+                              normalizedStep?.id,
+                            )}" data-step-field="ratingMax" ${isRunning ? "disabled" : ""} />
                           </div>
                         </div>
                         <div class="ea-data-sequence-field ea-data-sequence-field--span-2">
@@ -17929,7 +18004,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const enabledSteps = Array.isArray(activePlan?.steps)
         ? activePlan.steps.filter((step) => step?.enabled !== false).length
         : 0;
-      const invalidEnabledCount = validationSummary?.invalidEnabledSteps?.length ?? 0;
+      const invalidEnabledCount =
+        validationSummary?.invalidEnabledSteps?.length ?? 0;
       const dirty = Boolean(state?.dirty);
       planBadgeEl.textContent = dirty ? "Unsaved" : "Saved";
       planBadgeEl.classList.toggle("ea-data-sequence-badge--accent", dirty);
@@ -17971,7 +18047,6 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       executionPanelEl.innerHTML = renderRuntimeSurface();
       syncActions();
     };
-
 
     const loadPlans = async ({ force = false } = {}) => {
       if (sequenceSolveOverlayState?.loadingPromise && !force) {
@@ -18032,9 +18107,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       );
       state.plans = clonePlanList(store?.plans ?? []);
       state.activePlanId =
-        sanitizeDisplayText(store?.activePlanId) ??
-        state.plans[0]?.id ??
-        null;
+        sanitizeDisplayText(store?.activePlanId) ?? state.plans[0]?.id ?? null;
       state.dirty = false;
       ensureExpandedStepForPlan(getActivePlan());
       render();
@@ -18051,10 +18124,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const index = Math.max(1, (state?.plans?.length ?? 0) + 1);
       const plan = createDefaultSequencePlan({
         name: `Sequence Plan ${index}`,
-        fallbackSettings:
-          state?.defaultSettings ?? getDefaultSolverSettings(),
+        fallbackSettings: state?.defaultSettings ?? getDefaultSolverSettings(),
       });
-      state.plans = Array.isArray(state?.plans) ? state.plans.concat(plan) : [plan];
+      state.plans = Array.isArray(state?.plans)
+        ? state.plans.concat(plan)
+        : [plan];
       state.activePlanId = plan.id;
       state.expandedStepId = plan?.steps?.[0]?.id ?? null;
       state.dirty = true;
@@ -18100,9 +18174,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const nextStep = createDefaultSequenceStep({
         order: Array.isArray(plan?.steps) ? plan.steps.length : 0,
         fallbackSettings:
-          sequenceSolveOverlayState?.defaultSettings ?? getDefaultSolverSettings(),
+          sequenceSolveOverlayState?.defaultSettings ??
+          getDefaultSolverSettings(),
       });
-      plan.steps = Array.isArray(plan?.steps) ? plan.steps.concat(nextStep) : [nextStep];
+      plan.steps = Array.isArray(plan?.steps)
+        ? plan.steps.concat(nextStep)
+        : [nextStep];
       sequenceSolveOverlayState.expandedStepId = nextStep.id;
       sequenceSolveOverlayState.stepMotion = {
         stepId: nextStep.id,
@@ -18141,7 +18218,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 
     const removeStep = (stepId) => {
       const plan = getActivePlan();
-      if (!plan || !Array.isArray(plan?.steps) || plan.steps.length <= 1) return;
+      if (!plan || !Array.isArray(plan?.steps) || plan.steps.length <= 1)
+        return;
       const removedIndex = plan.steps.findIndex(
         (step) => String(step?.id) === String(stepId),
       );
@@ -18152,7 +18230,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           order: stepIndex,
         }));
       const fallbackStep =
-        plan.steps[Math.min(Math.max(removedIndex, 0), plan.steps.length - 1)] ??
+        plan.steps[
+          Math.min(Math.max(removedIndex, 0), plan.steps.length - 1)
+        ] ??
         plan.steps[plan.steps.length - 1] ??
         null;
       ensureExpandedStepForPlan(plan, {
@@ -18222,7 +18302,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       for (const step of steps ?? []) {
         const baseCount = await estimateStepOpenChallenges(step);
         const stepLoops = clampSequenceLoopCount(step?.loopCount ?? 1, 1);
-        total += baseCount * stepLoops * clampSequenceLoopCount(planLoopCount, 1);
+        total +=
+          baseCount * stepLoops * clampSequenceLoopCount(planLoopCount, 1);
       }
       return total;
     };
@@ -18233,7 +18314,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       currentStepId: null,
       currentStepLabel: null,
       currentPlanPass: 0,
-      planLoopCount: clampSequenceLoopCount(plan?.policy?.planLoopCount ?? 1, 1),
+      planLoopCount: clampSequenceLoopCount(
+        plan?.policy?.planLoopCount ?? 1,
+        1,
+      ),
       currentStepLoopPass: 0,
       currentStepLoopCount: 1,
       counters: {
@@ -18286,7 +18370,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           clampInt(stepLoopPass, 0, SEQUENCE_LOOP_COUNT_MAX) ?? 0;
       }
       if (stepLoopCount != null) {
-        runState.currentStepLoopCount = clampSequenceLoopCount(stepLoopCount, 1);
+        runState.currentStepLoopCount = clampSequenceLoopCount(
+          stepLoopCount,
+          1,
+        );
       }
       sequenceSolveOverlayState.render();
     };
@@ -18409,7 +18496,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       runContext,
       { onPhaseChange = null } = {},
     ) => {
-      const shouldAbort = () => Boolean(sequenceSolveOverlayState?.abortRequested);
+      const shouldAbort = () =>
+        Boolean(sequenceSolveOverlayState?.abortRequested);
       const challengeName = descriptor?.challengeName ?? "Challenge";
       const notifyPhase = (phase, message) => {
         if (typeof onPhaseChange !== "function") return;
@@ -18436,7 +18524,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         getPrefetchedSetRequirementsByChallengeId(descriptor?.setId) ?? null;
       const prefetched =
         prefetchedRequirementsById?.get?.(String(challengeEntity?.id ?? "")) ??
-        prefetchedRequirementsById?.get?.(String(descriptor?.challengeId ?? "")) ??
+        prefetchedRequirementsById?.get?.(
+          String(descriptor?.challengeId ?? ""),
+        ) ??
         null;
       let snapshot =
         prefetched?.snapshot && typeof prefetched.snapshot === "object"
@@ -18445,7 +18535,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       let slotInfo = buildChallengeSlotsForSolver(challengeEntity, null);
       const localRequirements = extractRequirements(challengeEntity);
       const hasUsableSnapshot =
-        Boolean(prefetched?.snapshot && typeof prefetched.snapshot === "object") ||
+        Boolean(
+          prefetched?.snapshot && typeof prefetched.snapshot === "object",
+        ) ||
         (Array.isArray(localRequirements)
           ? localRequirements.length > 0
           : Array.isArray(snapshot?.requirementsNormalized) &&
@@ -18469,15 +18561,19 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         hasUsableSlots =
           Array.isArray(slotInfo?.squadSlots) && slotInfo.squadSlots.length > 0;
         if (challengeEntity?.id != null) {
-          upsertPrefetchedSetRequirement(descriptor?.setId, challengeEntity.id, {
-            challengeId: String(challengeEntity.id),
-            challengeName,
-            snapshot,
-            source: "snapshot-loaded",
-            status: "ready",
-            updatedAt: Date.now(),
-            errorMessage: null,
-          });
+          upsertPrefetchedSetRequirement(
+            descriptor?.setId,
+            challengeEntity.id,
+            {
+              challengeId: String(challengeEntity.id),
+              challengeName,
+              snapshot,
+              source: "snapshot-loaded",
+              status: "ready",
+              updatedAt: Date.now(),
+              errorMessage: null,
+            },
+          );
         }
       }
 
@@ -18514,10 +18610,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         };
       }
 
-      const { filteredPlayers, poolFilters } = filterPlayersBySolverPoolSettings(
-        runContext?.allPlayers ?? [],
-        step?.settingsSnapshot,
-      );
+      const { filteredPlayers, poolFilters } =
+        filterPlayersBySolverPoolSettings(
+          runContext?.allPlayers ?? [],
+          step?.settingsSnapshot,
+        );
       if (!Array.isArray(filteredPlayers) || !filteredPlayers.length) {
         return {
           status: "skipped",
@@ -18711,7 +18808,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           },
           allSetIds,
         );
-        const allPlayers = Array.isArray(payload?.players) ? payload.players : [];
+        const allPlayers = Array.isArray(payload?.players)
+          ? payload.players
+          : [];
         const playerById = new Map(
           allPlayers
             .map((player) => [
@@ -18862,8 +18961,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                     updateRunStep(step.id, {
                       status: "solved",
                       message:
-                        outcome?.message ??
-                        "Challenge submitted successfully.",
+                        outcome?.message ?? "Challenge submitted successfully.",
                     });
                     continue;
                   }
@@ -18905,7 +19003,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                     stepId: step.id,
                   };
                 }
-                sequenceSolveOverlayState.runState.stopReason = hardFailure.message;
+                sequenceSolveOverlayState.runState.stopReason =
+                  hardFailure.message;
                 break planLoop;
               }
 
@@ -19000,10 +19099,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       }
     };
 
-
     const bumpNumberInput = (input, direction = "up") => {
       if (!input || input.disabled) return;
-      const current = readNumeric(input.value) ?? readNumeric(input.getAttribute("value")) ?? 0;
+      const current =
+        readNumeric(input.value) ??
+        readNumeric(input.getAttribute("value")) ??
+        0;
       const step = readNumeric(input.step) ?? 1;
       const min = readNumeric(input.min);
       const max = readNumeric(input.max);
@@ -19104,12 +19205,14 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     });
 
     // Tab clicks
-    overlay.querySelector(".ea-data-sequence-tabs")?.addEventListener("click", (event) => {
-      const tabBtn = event?.target?.closest?.(".ea-data-sequence-tab");
-      if (!tabBtn) return;
-      const tabKey = tabBtn.getAttribute("data-tab");
-      if (tabKey) switchTab(tabKey);
-    });
+    overlay
+      .querySelector(".ea-data-sequence-tabs")
+      ?.addEventListener("click", (event) => {
+        const tabBtn = event?.target?.closest?.(".ea-data-sequence-tab");
+        if (!tabBtn) return;
+        const tabKey = tabBtn.getAttribute("data-tab");
+        if (tabKey) switchTab(tabKey);
+      });
 
     // Sidebar: plan selection + deletion
     planListEl?.addEventListener("click", async (event) => {
@@ -19138,7 +19241,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     stepsPanelEl?.addEventListener("click", async (event) => {
       // Accordion toggle
       const summaryRow = event?.target?.closest?.("[data-step-toggle-id]");
-      if (summaryRow && !event?.target?.closest?.("[data-step-action]") && !event?.target?.closest?.("input") && !event?.target?.closest?.("label")) {
+      if (
+        summaryRow &&
+        !event?.target?.closest?.("[data-step-action]") &&
+        !event?.target?.closest?.("input") &&
+        !event?.target?.closest?.("label")
+      ) {
         const toggleId = summaryRow.getAttribute("data-step-toggle-id");
         if (toggleId) {
           const state = sequenceSolveOverlayState;
@@ -19178,8 +19286,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const activePlan = getActivePlan();
       if (!target || !activePlan) return;
       if (target.id === "ea-data-sequence-plan-name") {
-        activePlan.name =
-          sanitizeDisplayText(target.value) ?? "Sequence Plan";
+        activePlan.name = sanitizeDisplayText(target.value) ?? "Sequence Plan";
         touchPlans();
         render();
         return;
@@ -19207,7 +19314,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             ...step.settingsSnapshot,
             [toggleKey]: Boolean(target.checked),
           },
-          sequenceSolveOverlayState?.defaultSettings ?? getDefaultSolverSettings(),
+          sequenceSolveOverlayState?.defaultSettings ??
+            getDefaultSolverSettings(),
         );
         touchPlans();
         render();
@@ -19253,7 +19361,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         return;
       }
       if (field === "loopCount") {
-        step.loopCount = clampSequenceLoopCount(target.value, step?.loopCount ?? 1);
+        step.loopCount = clampSequenceLoopCount(
+          target.value,
+          step?.loopCount ?? 1,
+        );
         touchPlans();
         render();
         return;
@@ -19265,11 +19376,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         const nextRange = {
           ratingMin:
             field === "ratingMin"
-              ? clampInt(target.value, 0, 99) ?? currentRange.ratingMin
+              ? (clampInt(target.value, 0, 99) ?? currentRange.ratingMin)
               : currentRange.ratingMin,
           ratingMax:
             field === "ratingMax"
-              ? clampInt(target.value, 0, 99) ?? currentRange.ratingMax
+              ? (clampInt(target.value, 0, 99) ?? currentRange.ratingMax)
               : currentRange.ratingMax,
         };
         step.settingsSnapshot = normalizeSolverSettingsInput(
@@ -19277,7 +19388,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             ...step.settingsSnapshot,
             ratingRange: nextRange,
           },
-          sequenceSolveOverlayState?.defaultSettings ?? getDefaultSolverSettings(),
+          sequenceSolveOverlayState?.defaultSettings ??
+            getDefaultSolverSettings(),
         );
         touchPlans();
         render();
@@ -19288,7 +19400,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 
     // Settings panel: refresh button
     settingsPanelEl?.addEventListener("click", async (event) => {
-      const refreshBtn = event?.target?.closest?.("#ea-data-sequence-refresh-btn");
+      const refreshBtn = event?.target?.closest?.(
+        "#ea-data-sequence-refresh-btn",
+      );
       if (refreshBtn && !sequenceSolveOverlayState?.running) {
         await refreshSequenceDiscovery({ force: true });
         const active = getActivePlan();
@@ -19345,7 +19459,6 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       savePlans,
       runActivePlan,
     };
-
 
     if (!sequenceSolveOverlayKeyHandlerBound) {
       sequenceSolveOverlayKeyHandlerBound = true;
@@ -19519,7 +19632,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         root.querySelector?.("div.ut-sbc-hub-view > div.container") ?? null;
       if (nested instanceof HTMLElement) return nested;
     }
-    const fallback = document.querySelector("div.ut-sbc-hub-view > div.container");
+    const fallback = document.querySelector(
+      "div.ut-sbc-hub-view > div.container",
+    );
     return fallback instanceof HTMLElement ? fallback : null;
   };
 
@@ -19593,7 +19708,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const container = resolveSbcHubContainer(view);
     const hubRoot = container?.closest?.(".ut-sbc-hub-view") ?? null;
     if (!(hubRoot instanceof HTMLElement)) return false;
-    if (sequenceEntryObserver && sequenceEntryObserverRoot === hubRoot) return true;
+    if (sequenceEntryObserver && sequenceEntryObserverRoot === hubRoot)
+      return true;
     disconnectSequenceEntryObserver();
     try {
       sequenceEntryObserverRoot = hubRoot;
@@ -19666,7 +19782,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     }
 
     syncSequenceHubEntryButton(button);
-    if (wrapper.parentElement !== container || wrapper.nextElementSibling !== grid) {
+    if (
+      wrapper.parentElement !== container ||
+      wrapper.nextElementSibling !== grid
+    ) {
       try {
         container.insertBefore(wrapper, grid);
       } catch {}
@@ -19823,9 +19942,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           return;
         }
         const serializeSolveRequirements = (openChallenge) => ({
-          safeRequirements: (
-            openChallenge?.requirements ?? []
-          ).map(serializeRequirementForSolver),
+          safeRequirements: (openChallenge?.requirements ?? []).map(
+            serializeRequirementForSolver,
+          ),
           safeRequirementsNormalized: (
             openChallenge?.requirementsNormalized ?? []
           ).map((rule) => {
@@ -20006,12 +20125,19 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           const retryAllPlayers = Array.isArray(freshPayload?.players)
             ? freshPayload.players
             : [];
-          const { filteredPlayers: retryPlayers, poolFilters: retryPoolFilters } =
-            filterPlayersBySolverPoolSettings(retryAllPlayers, solverSettings, {
+          const {
+            filteredPlayers: retryPlayers,
+            poolFilters: retryPoolFilters,
+          } = filterPlayersBySolverPoolSettings(
+            retryAllPlayers,
+            solverSettings,
+            {
               requiredIds: retryRequiredIds,
-            });
+            },
+          );
           const retryMergedFilters = {
-            ...(freshPayload?.filters && typeof freshPayload.filters === "object"
+            ...(freshPayload?.filters &&
+            typeof freshPayload.filters === "object"
               ? freshPayload.filters
               : {}),
             ...retryPoolFilters,
@@ -20041,7 +20167,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             challengeId: startedChallengeId,
             reason,
           });
-          if (!Array.isArray(retryResult?.solutions) || !retryResult.solutions.length) {
+          if (
+            !Array.isArray(retryResult?.solutions) ||
+            !retryResult.solutions.length
+          ) {
             throw new Error("Auto-retry solve found no feasible squad.");
           }
           const retrySlotSolution = buildResolvedSlotSolution(
@@ -20182,9 +20311,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 error: String(applyError?.message ?? applyError),
               },
             );
-            const retryOutcome = await attemptStalePoolRecovery(
-              "missing-inventory",
-            );
+            const retryOutcome =
+              await attemptStalePoolRecovery("missing-inventory");
             appliedSolveResult = retryOutcome?.result ?? result;
             try {
               window.__eaDataSolver = window.__eaDataSolver || {};
@@ -20944,9 +21072,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const headline = sanitizeDisplayText(raw?.headline);
     const summary = sanitizeDisplayText(raw?.summary);
     const details = Array.isArray(raw?.details)
-      ? raw.details
-          .map((entry) => sanitizeDisplayText(entry))
-          .filter(Boolean)
+      ? raw.details.map((entry) => sanitizeDisplayText(entry)).filter(Boolean)
       : [];
     if (!version || !date || !headline || !summary) return null;
     return {
@@ -20986,11 +21112,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     if (changelog?.releaseMap instanceof Map) {
       return changelog.releaseMap.get(normalizedVersion) ?? null;
     }
-    const releases = Array.isArray(changelog?.releases) ? changelog.releases : [];
+    const releases = Array.isArray(changelog?.releases)
+      ? changelog.releases
+      : [];
     return (
       releases.find(
-        (entry) =>
-          sanitizeDisplayText(entry?.version) === normalizedVersion,
+        (entry) => sanitizeDisplayText(entry?.version) === normalizedVersion,
       ) ?? null
     );
   };
@@ -21078,7 +21205,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     changelog = null,
     currentVersion = null,
   } = {}) => {
-    const version = sanitizeDisplayText(currentVersion) ?? getCurrentExtensionVersion();
+    const version =
+      sanitizeDisplayText(currentVersion) ?? getCurrentExtensionVersion();
     if (!version) return false;
     if (!findChangelogReleaseForVersion(changelog, version)) return false;
     const seenState = getReleaseNotesStateFromPreferences(prefs);
@@ -21685,11 +21813,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
   };
 
   const clampSequenceLoopCount = (value, fallback = 1) =>
-    clampInt(
-      value,
-      SEQUENCE_LOOP_COUNT_MIN,
-      SEQUENCE_LOOP_COUNT_MAX,
-    ) ?? clampInt(fallback, SEQUENCE_LOOP_COUNT_MIN, SEQUENCE_LOOP_COUNT_MAX) ?? 1;
+    clampInt(value, SEQUENCE_LOOP_COUNT_MIN, SEQUENCE_LOOP_COUNT_MAX) ??
+    clampInt(fallback, SEQUENCE_LOOP_COUNT_MIN, SEQUENCE_LOOP_COUNT_MAX) ??
+    1;
 
   const getSequenceSetShape = (value) => {
     const text = String(value ?? "")
@@ -21708,7 +21834,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
   };
 
   const getSequenceRequiredSetShapeForKind = (kind) =>
-    String(kind ?? "").trim().toLowerCase() === SEQUENCE_TARGET_KIND_SET_SCOPE
+    String(kind ?? "")
+      .trim()
+      .toLowerCase() === SEQUENCE_TARGET_KIND_SET_SCOPE
       ? SEQUENCE_SET_SHAPE_SET
       : SEQUENCE_SET_SHAPE_SINGLE;
 
@@ -21746,7 +21874,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     return normalized;
   };
 
-  const createDefaultSequenceStep = ({ order = 0, fallbackSettings = null } = {}) => ({
+  const createDefaultSequenceStep = ({
+    order = 0,
+    fallbackSettings = null,
+  } = {}) => ({
     id: createSequenceEntityId("sequence-step"),
     order: clampInt(order, 0, 999) ?? 0,
     target: createDefaultSequenceTarget(),
@@ -21889,7 +22020,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         index: i,
         fallbackSettings: fallback,
       });
-      const key = sanitizeDisplayText(plan?.id) ?? createSequenceEntityId("sequence-plan");
+      const key =
+        sanitizeDisplayText(plan?.id) ??
+        createSequenceEntityId("sequence-plan");
       if (seenIds.has(key)) continue;
       seenIds.add(key);
       plans.push({
@@ -21943,8 +22076,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     if (!next.solver.features || typeof next.solver.features !== "object") {
       next.solver.features = {};
     }
-    next.solver.features.sequenceV1 =
-      next.solver.features.sequenceV1 !== false;
+    next.solver.features.sequenceV1 = next.solver.features.sequenceV1 !== false;
     next.solver.sequencePlans = normalizedStore;
     const saved = await savePreferences(next);
     const savedFallback = resolveSolverSettingsFromPreferences(saved, {
@@ -22747,7 +22879,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 
   const pingSolverBridge = () => {
     const requestId = crypto.randomUUID();
-    const detail = { type: SOLVER_BRIDGE_PING, requestId, source: SOLVER_BRIDGE_SOURCE };
+    const detail = {
+      type: SOLVER_BRIDGE_PING,
+      requestId,
+      source: SOLVER_BRIDGE_SOURCE,
+    };
     try {
       window.postMessage(detail, "*");
     } catch {}
@@ -24731,7 +24867,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const overviewReady = hookSbcOverviewPanel();
       const challengesReady = hookSbcChallengesView();
       const hubReady = hookSbcHubView();
-      const entryReady = hubReady ? ensureSequenceHubEntry(currentSbcHubView ?? null) : false;
+      const entryReady = hubReady
+        ? ensureSequenceHubEntry(currentSbcHubView ?? null)
+        : false;
       const rewardsReady = hookGameRewardsView();
       const itemDetailsReady = hookItemDetailsViewController();
       const slotActionReady = hookSlotActionPanelView();
@@ -25002,7 +25140,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     try {
       const expectedOrigin = window.location?.origin ?? "";
       const origin = event.origin;
-      if (origin && origin !== "null" && expectedOrigin && origin !== expectedOrigin) {
+      if (
+        origin &&
+        origin !== "null" &&
+        expectedOrigin &&
+        origin !== expectedOrigin
+      ) {
         return false;
       }
     } catch {}
@@ -25646,5 +25789,3 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     }),
   };
 })();
-
-
