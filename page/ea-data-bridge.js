@@ -5356,11 +5356,11 @@
 }
 .ea-data-sequence-progress-track {
   position: relative;
-  height: 6px;
-  margin: 8px 14px 0;
+  height: 9px;
+  margin: 8px 10px 0;
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.08);
 }
 .ea-data-sequence-progress-fill {
   position: absolute;
@@ -5368,9 +5368,17 @@
   width: var(--progress-pct, 0%);
   border-radius: inherit;
   background:
-    linear-gradient(90deg, rgba(255, 180, 60, 0.95), rgba(255, 130, 30, 0.9));
+    linear-gradient(90deg, rgba(255, 210, 90, 0.96) 0%, rgba(255, 167, 56, 0.94) 52%, rgba(255, 114, 24, 0.92) 100%);
   box-shadow: 0 0 12px rgba(255, 160, 50, 0.3);
-  transition: width 350ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    width 350ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 220ms ease,
+    box-shadow 220ms ease;
+}
+.ea-data-sequence-progress-fill[data-state="completed"] {
+  background:
+    linear-gradient(90deg, rgba(88, 255, 164, 0.95) 0%, rgba(42, 221, 125, 0.95) 52%, rgba(12, 188, 98, 0.92) 100%);
+  box-shadow: 0 0 14px rgba(40, 220, 120, 0.28);
 }
 .ea-data-sequence-progress-fill::after {
   content: '';
@@ -16903,6 +16911,53 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       return "pending";
     };
 
+    function normalizeSequenceRuntimeCopy(value) {
+      const text = String(value ?? "").trim();
+      return text || "";
+    }
+
+    function buildSequenceRuntimePrimaryMessage({
+      statusKey,
+      runtimeStatusText,
+      stopReason,
+      firstErrorMessage,
+    }) {
+      const normalizedStatus = normalizeRunStatusKey(statusKey);
+      const pieces = [];
+      const runtimeCopy = normalizeSequenceRuntimeCopy(runtimeStatusText);
+      const normalizedStopReason = normalizeSequenceRuntimeCopy(stopReason);
+      const normalizedFirstError = normalizeSequenceRuntimeCopy(firstErrorMessage);
+
+      if (normalizedStatus === "completed") {
+        return "Sequence completed.";
+      }
+
+      if (runtimeCopy) {
+        pieces.push(runtimeCopy);
+      }
+
+      if (normalizedFirstError) {
+        pieces.push(`First error: ${normalizedFirstError}`);
+      }
+
+      if (
+        normalizedStopReason &&
+        normalizedStatus !== "completed" &&
+        normalizedStopReason !== normalizedFirstError
+      ) {
+        pieces.push(`Stop reason: ${normalizedStopReason}`);
+      }
+
+      return pieces.join(" • ");
+    }
+
+    function getSequenceProgressFillState({ statusKey, progressPct }) {
+      return normalizeRunStatusKey(statusKey) === "completed" &&
+        Number(progressPct) >= 100
+        ? "completed"
+        : "active";
+    }
+
     const clonePlanList = (plans) =>
       normalizeSequencePlanStore(
         {
@@ -17473,14 +17528,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       };
       const statusText = sanitizeDisplayText(runState?.status) ?? "idle";
       const runBadgeStatus = normalizeRunStatusKey(statusText);
-      const messages = [];
-      if (state?.runtimeStatusText) messages.push(state.runtimeStatusText);
-      if (runState?.firstError?.message) {
-        messages.push(`First error: ${runState.firstError.message}`);
-      }
-      if (runState?.stopReason) {
-        messages.push(`Stop reason: ${runState.stopReason}`);
-      }
+      const primaryMessage = buildSequenceRuntimePrimaryMessage({
+        statusKey: runBadgeStatus,
+        runtimeStatusText: state?.runtimeStatusText,
+        stopReason: runState?.stopReason,
+        firstErrorMessage: runState?.firstError?.message,
+      });
       const planPass = clampInt(runState?.currentPlanPass ?? 0, 0, 999) ?? 0;
       const planLoopCount = clampSequenceLoopCount(
         runState?.planLoopCount ?? 1,
@@ -17523,6 +17576,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         runBadgeStatus === "completed" && plannedChallenges > 0
           ? 100
           : rawProgressPct;
+      const progressFillState = getSequenceProgressFillState({
+        statusKey: runBadgeStatus,
+        progressPct,
+      });
       const usedSummary =
         runState?.usedSummary && typeof runState.usedSummary === "object"
           ? runState.usedSummary
@@ -17602,13 +17659,13 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 <span>${escapeHtml(`${progressPct}%`)}</span>
               </div>
               <div class="ea-data-sequence-progress-track">
-                <div class="ea-data-sequence-progress-fill" style="--progress-pct:${escapeHtml(
-                  `${progressPct}%`,
-                )}"></div>
+                <div class="ea-data-sequence-progress-fill" data-state="${escapeHtml(
+                  progressFillState,
+                )}" style="--progress-pct:${escapeHtml(`${progressPct}%`)}"></div>
               </div>
               <div class="ea-data-sequence-progress-status">
                 <div class="ea-data-sequence-progress-status-primary">${escapeHtml(
-                  messages.join(" \u2022 ") ||
+                  primaryMessage ||
                     "Idle. Configure a plan and start when ready.",
                 )}</div>
                 <div class="ea-data-sequence-progress-status-secondary">${escapeHtml(
@@ -19039,8 +19096,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               "Stopped by user at a safe boundary.";
           } else {
             sequenceSolveOverlayState.runState.status = "completed";
-            sequenceSolveOverlayState.runState.stopReason =
-              noWorkStopReason ?? "Sequence completed.";
+            sequenceSolveOverlayState.runState.stopReason = noWorkStopReason;
           }
         }
 
