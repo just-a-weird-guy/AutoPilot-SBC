@@ -1,5 +1,38 @@
-const injectPageScript = (path, { type = "module" } = {}) =>
+const waitForInjectionHost = ({ timeoutMs = 3000 } = {}) =>
   new Promise((resolve, reject) => {
+    const host = document.head || document.documentElement;
+    if (host) {
+      resolve(host);
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      try {
+        observer.disconnect();
+      } catch {}
+      reject(new Error("Timed out waiting for document root"));
+    }, timeoutMs);
+
+    const observer = new MutationObserver(() => {
+      const nextHost = document.head || document.documentElement;
+      if (!nextHost) return;
+      clearTimeout(timeoutId);
+      try {
+        observer.disconnect();
+      } catch {}
+      resolve(nextHost);
+    });
+
+    try {
+      observer.observe(document, { childList: true, subtree: true });
+    } catch (error) {
+      clearTimeout(timeoutId);
+      reject(error);
+    }
+  });
+
+const injectPageScript = async (path, { type = "module" } = {}) =>
+  new Promise(async (resolve, reject) => {
     const script = document.createElement("script");
     const src = chrome.runtime.getURL(path);
     script.src = src;
@@ -19,7 +52,12 @@ const injectPageScript = (path, { type = "module" } = {}) =>
       error.eventType = errorEvent?.type ?? null;
       reject(error);
     };
-    (document.head || document.documentElement).appendChild(script);
+    try {
+      const host = await waitForInjectionHost();
+      host.appendChild(script);
+    } catch (error) {
+      reject(error);
+    }
   });
 
 const BRIDGE_INJECT_REQUEST = "EA_PAGE_BRIDGE_INJECT";
@@ -30,7 +68,7 @@ const requestBackgroundBridgeInject = (path) =>
       chrome.runtime.sendMessage(
         {
           type: BRIDGE_INJECT_REQUEST,
-          payload: { path },
+          payload: { path, href: location.href },
         },
         (response) => {
           const runtimeError = chrome.runtime?.lastError;
@@ -91,9 +129,7 @@ void (async () => {
   if (window !== window.top) return;
   await exposeExtensionMetadataToPage();
   const bridgePath = "page/ea-data-bridge.js";
-  const localExclusionsSharedPath = "page/local-exclusions-shared.js";
   try {
-    await injectPageScript(localExclusionsSharedPath, { type: null });
     await injectPageScript(bridgePath, { type: "module" });
   } catch (error) {
     console.warn("[EA Data] Module script injection failed; retrying classic", {
@@ -103,14 +139,12 @@ void (async () => {
       message: error?.message ?? String(error),
     });
     try {
-      await injectPageScript(localExclusionsSharedPath, { type: null });
       await injectPageScript(bridgePath, { type: null });
       console.warn("[EA Data] Classic script injection fallback succeeded", {
         path: bridgePath,
       });
     } catch (fallbackError) {
       try {
-        await requestBackgroundBridgeInject(localExclusionsSharedPath);
         await requestBackgroundBridgeInject(bridgePath);
         console.warn(
           "[EA Data] Background executeScript injection fallback succeeded",

@@ -38,7 +38,6 @@
     {
       "resources": [
         "page/ea-data-bridge.js",
-        "page/local-exclusions-shared.js",
         "data/changelog.json",
         "solver/solver.js",
         "solver/chemistry.js",

@@ -16,6 +16,12 @@ data/*
 !scripts/
 scripts/*
 !scripts/changelog-entry.js
+!scripts/replay-totw-matrix.mjs
+
+# Local planning / scratch notes
+findings.md
+progress.md
+task_plan.md
 
 backup-project.ps1
 AGENT.md

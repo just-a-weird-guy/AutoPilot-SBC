@@ -3,7 +3,6 @@ import {
   computeBestChemistryAssignment,
   normalizeSlotsForChemistry,
 } from "./chemistry.js";
-import { isTotwPlayer } from "./pool-filter.js";
 
 const ROUND_DECIMALS = 2;
 const ROUND_THRESHOLD = 0.96;
@@ -159,6 +158,16 @@ const toBooleanSetting = (value, fallback = false) => {
 
 const normalizeString = (value) =>
   value == null ? null : String(value).trim().toLowerCase();
+
+const isTotwPlayer = (player) => {
+  const rarity = normalizeString(player?.rarityName);
+  if (rarity) {
+    if (rarity.includes("team of the week")) return true;
+    if (rarity.includes("totw")) return true;
+    if (rarity.includes("inform")) return true;
+  }
+  return toNumber(player?.rarityId) === 3;
+};
 
 const extractValues = (value) => {
   if (value == null) return [];
