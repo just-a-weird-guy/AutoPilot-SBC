@@ -8,6 +8,124 @@
     SETS: "EA_DATA_GET_SBC_SETS",
   };
   const RES = "EA_DATA_RESPONSE";
+  const localExclusionsShared =
+    globalThis.__eaDataLocalExclusionsShared &&
+    typeof globalThis.__eaDataLocalExclusionsShared === "object"
+      ? globalThis.__eaDataLocalExclusionsShared
+      : null;
+  const LOCAL_EXCLUSION_FIELDS =
+    localExclusionsShared?.LOCAL_EXCLUSION_FIELDS ??
+    Object.freeze([
+      "allowedGlobalLeagueIds",
+      "allowedGlobalNationIds",
+      "extraExcludedLeagueIds",
+      "extraExcludedNationIds",
+    ]);
+  const getDefaultLocalExclusionSettings = () =>
+    typeof localExclusionsShared?.getDefaultLocalExclusionSettings ===
+    "function"
+      ? localExclusionsShared.getDefaultLocalExclusionSettings()
+      : {
+          allowedGlobalLeagueIds: [],
+          allowedGlobalNationIds: [],
+          extraExcludedLeagueIds: [],
+          extraExcludedNationIds: [],
+        };
+  const normalizeLocalExclusionSettings = (value, fallback = null) =>
+    typeof localExclusionsShared?.normalizeLocalExclusionSettings ===
+    "function"
+      ? localExclusionsShared.normalizeLocalExclusionSettings(value, fallback)
+      : {
+          ...getDefaultLocalExclusionSettings(),
+          ...(value && typeof value === "object" ? value : {}),
+        };
+  const getLocalExclusionStateForKind = (options = {}) =>
+    typeof localExclusionsShared?.getLocalExclusionStateForKind === "function"
+      ? localExclusionsShared.getLocalExclusionStateForKind(options)
+      : {
+          allowedField:
+            String(options?.kind ?? "league").trim().toLowerCase() ===
+            "nation"
+              ? "allowedGlobalNationIds"
+              : "allowedGlobalLeagueIds",
+          extraField:
+            String(options?.kind ?? "league").trim().toLowerCase() ===
+            "nation"
+              ? "extraExcludedNationIds"
+              : "extraExcludedLeagueIds",
+          globalExcludedIds: Array.isArray(options?.globalExcludedIds)
+            ? options.globalExcludedIds
+            : [],
+          allowedGlobalIds: [],
+          extraExcludedIds: [],
+          effectiveExcludedIds: Array.isArray(options?.globalExcludedIds)
+            ? options.globalExcludedIds
+            : [],
+        };
+  const toggleLocalExclusionId = (options = {}) =>
+    typeof localExclusionsShared?.toggleLocalExclusionId === "function"
+      ? localExclusionsShared.toggleLocalExclusionId(options)
+      : normalizeLocalExclusionSettings(options?.settings);
+  const resolveLocalExclusionSettings = (options = {}) =>
+    typeof localExclusionsShared?.resolveLocalExclusionSettings === "function"
+      ? localExclusionsShared.resolveLocalExclusionSettings(options)
+      : {
+          ...normalizeLocalExclusionSettings(options?.localSettings),
+          excludedLeagueIds: Array.isArray(options?.globalExcludedLeagueIds)
+            ? options.globalExcludedLeagueIds
+            : [],
+          excludedNationIds: Array.isArray(options?.globalExcludedNationIds)
+            ? options.globalExcludedNationIds
+            : [],
+        };
+  const normalizeSetLocalExclusionsStore = (value) =>
+    typeof localExclusionsShared?.normalizeSetLocalExclusionsStore === "function"
+      ? localExclusionsShared.normalizeSetLocalExclusionsStore(value)
+      : {};
+  const getSetLocalExclusionSettings = (store, setId) =>
+    typeof localExclusionsShared?.getSetLocalExclusionSettings === "function"
+      ? localExclusionsShared.getSetLocalExclusionSettings(store, setId)
+      : getDefaultLocalExclusionSettings();
+  const setSetLocalExclusionSettings = (store, setId, settings) =>
+    typeof localExclusionsShared?.setSetLocalExclusionSettings === "function"
+      ? localExclusionsShared.setSetLocalExclusionSettings(store, setId, settings)
+      : normalizeSetLocalExclusionsStore(store);
+  const applyLocalExclusionsToSettings = ({
+    settings = null,
+    globalSettings = null,
+  } = {}) =>
+    typeof localExclusionsShared?.applyLocalExclusionsToSettings === "function"
+      ? localExclusionsShared.applyLocalExclusionsToSettings({
+          settings,
+          globalSettings,
+        })
+      : settings && typeof settings === "object"
+        ? settings
+        : {};
+  const mergeLocalExclusionsIntoSettings = ({
+    settings = null,
+    globalSettings = null,
+    localSettings = null,
+    force = false,
+  } = {}) =>
+    typeof localExclusionsShared?.mergeLocalExclusionsIntoSettings ===
+    "function"
+      ? localExclusionsShared.mergeLocalExclusionsIntoSettings({
+          settings,
+          globalSettings,
+          localSettings,
+          force,
+        })
+      : applyLocalExclusionsToSettings({
+          settings:
+            settings && typeof settings === "object"
+              ? {
+                  ...settings,
+                  ...normalizeLocalExclusionSettings(localSettings),
+                }
+              : localSettings,
+          globalSettings,
+        });
 
   const isReady = () =>
     typeof window.services !== "undefined" &&
@@ -471,6 +589,14 @@
     const trimmed = value.trim();
     return trimmed ? trimmed : null;
   };
+
+  const escapeHtml = (value) =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#39;");
 
   const readExtensionMetadata = () => {
     const root = document?.documentElement ?? null;
@@ -6131,6 +6257,99 @@
   font-weight: 600;
   margin-top: 6px;
 }
+.ea-data-local-exclusions {
+  margin-top: 12px;
+}
+.ea-data-local-exclusions__copy {
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 6px;
+}
+.ea-data-local-exclusions__section {
+  margin-top: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+.ea-data-local-exclusions__body {
+  padding: 8px;
+}
+.ea-data-local-exclusions__helper {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.ea-data-local-exclusions__summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ea-data-local-exclusions__summary-group {
+  min-width: 0;
+}
+.ea-data-local-exclusions__summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ea-data-local-exclusions__subheading {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.ea-data-local-exclusions__subcopy {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.ea-data-local-exclusions__chip--allowed {
+  border-color: rgba(73, 201, 124, 0.46);
+  background: rgba(73, 201, 124, 0.13);
+}
+.ea-data-local-exclusions__chip--extra {
+  border-color: rgba(255, 102, 102, 0.38);
+  background: rgba(255, 102, 102, 0.12);
+}
+.ea-data-local-exclusions__option-note {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.56);
+}
+.ea-data-local-exclusions__status {
+  min-width: 86px;
+  text-align: right;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+.ea-data-local-exclusions__status--default {
+  color: rgba(255, 255, 255, 0.72);
+}
+.ea-data-local-exclusions__status--global {
+  color: rgba(255, 140, 140, 0.92);
+}
+.ea-data-local-exclusions__status--allowed {
+  color: rgba(73, 201, 124, 0.95);
+}
+.ea-data-local-exclusions__status--extra {
+  color: rgba(255, 170, 170, 0.92);
+}
+@media (max-width: 640px) {
+  .ea-data-local-exclusions__summary {
+    grid-template-columns: 1fr;
+  }
+}
 
 #ea-data-settings-overlay {
   position: fixed;
@@ -7848,6 +8067,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           ${renderSolverToggleFields({ scope: "challenge", idPrefix: "ea-data-setting-" })}
         </div>
 
+        <div id="ea-data-settings-local-exclusions"></div>
+
         <div class="ea-data-settings-actions">
           <button type="button" class="ea-data-btn ea-data-btn--ghost" data-action="cancel">Cancel</button>
           <button type="button" class="ea-data-btn ea-data-btn--primary" data-action="save">Save</button>
@@ -7866,13 +8087,33 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const closeBtn = overlay.querySelector('[data-action="close"]');
     const cancelBtn = overlay.querySelector('[data-action="cancel"]');
     const saveBtn = overlay.querySelector('[data-action="save"]');
+    const localExclusionsMount = overlay.querySelector(
+      "#ea-data-settings-local-exclusions",
+    );
     const toggleBinder = createSolverToggleBinder({
       root: overlay,
       scope: "challenge",
       idPrefix: "ea-data-setting-",
     });
+    const localExclusionsEditor = attachLocalExclusionsEditor(
+      localExclusionsMount,
+      {
+        idPrefix: "ea-data-settings-local-exclusions",
+        title: "Local Exclusions",
+        copy:
+          "These overrides only apply to the current challenge and sit on top of your global exclusions.",
+        onChange: ({ localSettings, effectiveSettings }) => {
+          if (syncingLocalExclusions) return;
+          settingsOverlayState.current = {
+            ...effectiveSettings,
+            ...localSettings,
+          };
+        },
+      },
+    );
+    let syncingLocalExclusions = false;
 
-    const sync = (settings, { source } = {}) => {
+    const sync = (settings, { source, globalSettings = null } = {}) => {
       const previous =
         settingsOverlayState?.current &&
         typeof settingsOverlayState.current === "object"
@@ -7962,11 +8203,25 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       } catch {}
 
       const poolSettings = toggleBinder.setValues(raw, previous);
+      const normalizedSettings = normalizeSolverSettingsInput(raw, previous);
 
       settingsOverlayState.current = {
         ratingRange: { ratingMin, ratingMax },
         ...poolSettings,
+        excludedPlayerIds: normalizedSettings.excludedPlayerIds,
+        excludedLeagueIds: normalizedSettings.excludedLeagueIds,
+        excludedNationIds: normalizedSettings.excludedNationIds,
+        allowedGlobalLeagueIds: normalizedSettings.allowedGlobalLeagueIds,
+        allowedGlobalNationIds: normalizedSettings.allowedGlobalNationIds,
+        extraExcludedLeagueIds: normalizedSettings.extraExcludedLeagueIds,
+        extraExcludedNationIds: normalizedSettings.extraExcludedNationIds,
       };
+      localExclusionsEditor?.sync({
+        settings: settingsOverlayState.current,
+        globalSettings:
+          normalizeSolverSettingsInput(globalSettings, getDefaultSolverSettings()),
+        localSettings: normalizeLocalExclusionSettings(normalizedSettings),
+      });
     };
 
     settingsOverlayState = {
@@ -8041,6 +8296,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const next = {
         ratingRange: normalizeRatingRange(current.ratingRange),
         ...toggleBinder.getValues(current),
+        ...localExclusionsEditor?.getLocalSettings?.(),
       };
       try {
         const challengeId =
@@ -8111,13 +8367,22 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     } catch {}
 
     let settings = null;
+    let globalSettings = null;
     try {
       settings = await getSolverSettingsForChallenge(challengeId);
     } catch {
       settings = getDefaultSolverSettings();
     }
     try {
-      settingsOverlayState?.sync?.(settings, { source: "open" });
+      globalSettings = await getSolverSettingsForChallenge(null);
+    } catch {
+      globalSettings = getDefaultSolverSettings();
+    }
+    try {
+      settingsOverlayState?.sync?.(settings, {
+        source: "open",
+        globalSettings,
+      });
     } catch {}
     try {
       const minInput = overlay.querySelector("#ea-data-rating-min-input");
@@ -8498,6 +8763,460 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         state.sync(settings, { source: "external" });
       } catch {}
     }
+  };
+
+  const getLeagueExclusionLabel = (leagueId) => {
+    const id = normalizeLeagueId(leagueId);
+    if (!id) return null;
+    const cached = leagueMetaCache.get(String(id));
+    const cachedName = sanitizeDisplayText(cached?.name);
+    if (cachedName) return cachedName;
+    const lookupName = sanitizeDisplayText(getLeagueName(id));
+    if (lookupName) {
+      upsertLeagueMeta(id, { name: lookupName });
+      return lookupName;
+    }
+    return `League ${id}`;
+  };
+
+  const getNationExclusionLabel = (nationId) => {
+    const id = normalizeNationId(nationId);
+    if (!id) return null;
+    const cached = nationMetaCache.get(String(id));
+    const cachedName = sanitizeDisplayText(cached?.name);
+    if (cachedName) return cachedName;
+    const lookupName = sanitizeDisplayText(getNationName(id));
+    if (lookupName) {
+      upsertNationMeta(id, { name: lookupName });
+      return lookupName;
+    }
+    return `Nation ${id}`;
+  };
+
+  const attachLocalExclusionsEditor = (
+    mountEl,
+    {
+      idPrefix = "ea-data-local-exclusions",
+      title = "Local Exclusions",
+      copy =
+        "Toggle items directly. Global exclusions can be enabled for this solver, and default items can be disabled locally.",
+      onChange = null,
+    } = {},
+  ) => {
+    if (!mountEl) return null;
+
+    const state = {
+      baseSettings: getDefaultSolverSettings(),
+      globalSettings: getDefaultSolverSettings(),
+      localSettings: getDefaultLocalExclusionSettings(),
+      disabled: false,
+      expanded: { league: false, nation: false },
+      search: { league: "", nation: "" },
+      options: { league: [], nation: [] },
+      hydrated: { league: false, nation: false },
+      hydrateToken: { league: 0, nation: 0 },
+    };
+
+    const getKindConfig = (kind) =>
+      kind === "nation"
+        ? {
+            label: "Excluded Nations",
+            searchPlaceholder: "Search nations by name or ID...",
+            allowedLabel: "Allowed here",
+            extraLabel: "Disabled here",
+            helperCopy:
+              "Click a row to enable or disable it for this solver. Global exclusions can be turned on here without changing your defaults.",
+            optionsGetter: getAvailableNationsForExclusion,
+            getFallbackOptions: getNationOptionsFromMetaCache,
+            getLabel: getNationExclusionLabel,
+          }
+        : {
+            label: "Excluded Leagues",
+            searchPlaceholder: "Search leagues by name or ID...",
+            allowedLabel: "Allowed here",
+            extraLabel: "Disabled here",
+            helperCopy:
+              "Click a row to enable or disable it for this solver. Global exclusions can be turned on here without changing your defaults.",
+            optionsGetter: getAvailableLeaguesForExclusion,
+            getFallbackOptions: getLeagueOptionsFromMetaCache,
+            getLabel: getLeagueExclusionLabel,
+          };
+
+    const computeEffectiveSettings = () =>
+      mergeLocalExclusionsIntoSettings({
+        settings: state.baseSettings,
+        globalSettings: state.globalSettings,
+        localSettings: state.localSettings,
+        force: true,
+      });
+
+    const emitChange = () => {
+      if (typeof onChange !== "function") return;
+      onChange({
+        localSettings: normalizeLocalExclusionSettings(state.localSettings),
+        effectiveSettings: computeEffectiveSettings(),
+      });
+    };
+
+    const renderSummaryChips = (container, ids, { kind, mode, getLabel }) => {
+      if (!container) return;
+      try {
+        container.innerHTML = "";
+      } catch {}
+      if (!ids.length) {
+        const empty = document.createElement("div");
+        empty.className = "ea-data-excluded-empty";
+        empty.textContent = "None";
+        container.append(empty);
+        return;
+      }
+      for (const id of ids) {
+        const chip = document.createElement("div");
+        chip.className = `ea-data-excluded-league-chip ea-data-local-exclusions__chip--${mode}`;
+
+        const label = document.createElement("span");
+        label.textContent =
+          getLabel(id) ?? `${kind === "nation" ? "Nation" : "League"} ${id}`;
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "ea-data-excluded-league-chip-remove";
+        removeBtn.textContent = "\u00D7";
+        removeBtn.disabled = state.disabled;
+        removeBtn.setAttribute("data-local-action", "toggle");
+        removeBtn.setAttribute("data-kind", kind);
+        removeBtn.setAttribute("data-id", String(id));
+
+        chip.append(label);
+        chip.append(removeBtn);
+        container.append(chip);
+      }
+    };
+
+    const renderOptionList = (container, { kind, options, search, current, getLabel, loading }) => {
+      if (!container) return;
+      try {
+        container.innerHTML = "";
+      } catch {}
+
+      const allowedSet = new Set(current.allowedGlobalIds.map(String));
+      const extraSet = new Set(current.extraExcludedIds.map(String));
+      const globalExcludedSet = new Set(current.globalExcludedIds.map(String));
+      const effectiveSet = new Set(current.effectiveExcludedIds.map(String));
+      const filtered = (Array.isArray(options) ? options : []).filter((entry) => {
+        const id = String(entry?.id ?? "");
+        const name = String(entry?.name ?? "");
+        if (!search) return true;
+        const lowerSearch = search.toLowerCase();
+        return (
+          id.toLowerCase().includes(lowerSearch) ||
+          name.toLowerCase().includes(lowerSearch)
+        );
+      });
+
+      if (!filtered.length) {
+        const empty = document.createElement("div");
+        empty.className = "ea-data-excluded-empty";
+        empty.textContent = loading ? "Loading options..." : "No matches found.";
+        container.append(empty);
+        return;
+      }
+
+      for (const entry of filtered) {
+        const id = String(entry?.id ?? "");
+        const globallyExcluded = globalExcludedSet.has(id);
+        const allowedHere = allowedSet.has(id);
+        const extraExcluded = extraSet.has(id);
+        const effectivelyExcluded = effectiveSet.has(id);
+        let statusText = "Enabled by default";
+        let noteText = "Click to disable for this solver.";
+        let statusClass = "default";
+        if (globallyExcluded && !allowedHere) {
+          statusText = "Disabled globally";
+          noteText = "Click to enable for this solver.";
+          statusClass = "global";
+        } else if (globallyExcluded && allowedHere) {
+          statusText = "Enabled here";
+          noteText = "Click to restore the global exclusion.";
+          statusClass = "allowed";
+        } else if (extraExcluded) {
+          statusText = "Disabled here";
+          noteText = "Click to re-enable.";
+          statusClass = "extra";
+        }
+
+        const row = document.createElement("div");
+        row.className = "ea-data-excluded-leagues-option";
+        row.setAttribute("data-local-action", "toggle");
+        row.setAttribute("data-kind", kind);
+        row.setAttribute("data-id", id);
+        row.setAttribute("data-selected", effectivelyExcluded ? "true" : "false");
+
+        const main = document.createElement("div");
+        main.className = "ea-data-excluded-leagues-option-main";
+
+        const nameEl = document.createElement("div");
+        nameEl.className = "ea-data-excluded-leagues-option-name";
+        nameEl.textContent = sanitizeDisplayText(entry?.name) ?? getLabel(id) ?? id;
+
+        const idEl = document.createElement("div");
+        idEl.className = "ea-data-excluded-leagues-option-id";
+        idEl.textContent = `${kind === "nation" ? "Nation" : "League"} ID ${id}`;
+
+        const noteEl = document.createElement("div");
+        noteEl.className = "ea-data-local-exclusions__option-note";
+        noteEl.textContent = noteText;
+
+        main.append(nameEl);
+        main.append(idEl);
+        main.append(noteEl);
+
+        const statusEl = document.createElement("div");
+        statusEl.className = `ea-data-local-exclusions__status ea-data-local-exclusions__status--${statusClass}`;
+        statusEl.textContent = statusText;
+
+        row.append(main);
+        row.append(statusEl);
+        container.append(row);
+      }
+    };
+
+    const renderKind = (kind) => {
+      const config = getKindConfig(kind);
+      const section = mountEl.querySelector(`[data-local-kind="${kind}"]`);
+      if (!section) return;
+      const current = getLocalExclusionStateForKind({
+        kind,
+        settings: state.localSettings,
+        globalExcludedIds:
+          kind === "nation"
+            ? state.globalSettings?.excludedNationIds
+            : state.globalSettings?.excludedLeagueIds,
+      });
+      const button = section.querySelector("[data-local-kind-toggle]");
+      const panel = section.querySelector("[data-local-kind-panel]");
+      const countEl = section.querySelector("[data-local-kind-count]");
+      const overrideCount =
+        current.allowedGlobalIds.length + current.extraExcludedIds.length;
+      if (countEl) {
+        countEl.textContent = `${overrideCount} changed | ${current.effectiveExcludedIds.length} effective`;
+      }
+      if (button) {
+        button.setAttribute(
+          "aria-expanded",
+          state.expanded[kind] ? "true" : "false",
+        );
+      }
+      if (panel) {
+        panel.hidden = !state.expanded[kind];
+        panel.setAttribute(
+          "aria-hidden",
+          state.expanded[kind] ? "false" : "true",
+        );
+      }
+
+      const searchInput = section.querySelector("[data-local-search]");
+      const allowedClear = section.querySelector('[data-local-clear="allowed"]');
+      const extraClear = section.querySelector('[data-local-clear="extra"]');
+      if (searchInput) {
+        searchInput.disabled = state.disabled;
+        if (searchInput.value !== state.search[kind]) {
+          searchInput.value = state.search[kind];
+        }
+      }
+      if (allowedClear) {
+        allowedClear.disabled = state.disabled || current.allowedGlobalIds.length === 0;
+      }
+      if (extraClear) {
+        extraClear.disabled = state.disabled || current.extraExcludedIds.length === 0;
+      }
+
+      renderSummaryChips(
+        section.querySelector('[data-local-summary="allowed"]'),
+        current.allowedGlobalIds,
+        { kind, mode: "allowed", getLabel: config.getLabel },
+      );
+      renderSummaryChips(
+        section.querySelector('[data-local-summary="extra"]'),
+        current.extraExcludedIds,
+        { kind, mode: "extra", getLabel: config.getLabel },
+      );
+      renderOptionList(section.querySelector('[data-local-options="all"]'), {
+        kind,
+        options: state.options[kind],
+        search: state.search[kind],
+        current,
+        getLabel: config.getLabel,
+        loading: !state.hydrated[kind],
+      });
+    };
+
+    const render = () => {
+      renderKind("league");
+      renderKind("nation");
+    };
+
+    const hydrateKindOptions = async (kind, { force = false } = {}) => {
+      const config = getKindConfig(kind);
+      const token = ++state.hydrateToken[kind];
+      try {
+        const options = await config.optionsGetter({ force });
+        if (token !== state.hydrateToken[kind]) return;
+        state.options[kind] = Array.isArray(options) ? options : [];
+        state.hydrated[kind] = true;
+      } catch {
+        if (token !== state.hydrateToken[kind]) return;
+        state.options[kind] = config.getFallbackOptions();
+        state.hydrated[kind] = true;
+      }
+      renderKind(kind);
+    };
+
+    mountEl.innerHTML = `
+      <div class="ea-data-local-exclusions">
+        <div class="ea-data-settings-section-label" style="margin-top:12px">${escapeHtml(title)}</div>
+        <div class="ea-data-local-exclusions__copy">${escapeHtml(copy)}</div>
+        ${["league", "nation"].map((kind) => {
+          const config = getKindConfig(kind);
+          return `
+            <div class="ea-data-local-exclusions__section" data-local-kind="${kind}">
+              <button type="button" class="ea-data-collapsible-heading" data-local-kind-toggle="${kind}" aria-expanded="false" aria-controls="${idPrefix}-${kind}">
+                <span>${escapeHtml(config.label)}</span>
+                <span class="ea-data-excluded-count" data-local-kind-count="${kind}">0 changed | 0 effective</span>
+              </button>
+              <div class="ea-data-local-exclusions__body" id="${idPrefix}-${kind}" data-local-kind-panel="${kind}" aria-hidden="true" hidden>
+                <div class="ea-data-local-exclusions__helper">${escapeHtml(config.helperCopy)}</div>
+                <input class="ea-data-excluded-leagues-search" type="search" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(config.searchPlaceholder)}" data-local-search="${kind}" data-kind="${kind}" />
+                <div class="ea-data-local-exclusions__summary">
+                  <div class="ea-data-local-exclusions__summary-group">
+                    <div class="ea-data-local-exclusions__summary-head">
+                      <span class="ea-data-local-exclusions__subheading">${escapeHtml(config.allowedLabel)}</span>
+                      <button type="button" class="ea-data-excluded-clear" data-local-clear="allowed" data-kind="${kind}">Clear</button>
+                    </div>
+                    <div class="ea-data-excluded-leagues-selected" data-local-summary="allowed"></div>
+                  </div>
+                  <div class="ea-data-local-exclusions__summary-group">
+                    <div class="ea-data-local-exclusions__summary-head">
+                      <span class="ea-data-local-exclusions__subheading">${escapeHtml(config.extraLabel)}</span>
+                      <button type="button" class="ea-data-excluded-clear" data-local-clear="extra" data-kind="${kind}">Clear</button>
+                    </div>
+                    <div class="ea-data-excluded-leagues-selected" data-local-summary="extra"></div>
+                  </div>
+                </div>
+                <div class="ea-data-excluded-leagues-list" data-local-options="all"></div>
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    `;
+
+    mountEl.addEventListener("click", (event) => {
+      const toggleBtn = event?.target?.closest?.("[data-local-kind-toggle]");
+      if (toggleBtn) {
+        const kind = String(toggleBtn.getAttribute("data-local-kind-toggle") ?? "");
+        if (kind in state.expanded) {
+          state.expanded[kind] = !state.expanded[kind];
+          renderKind(kind);
+          if (state.expanded[kind] && !state.hydrated[kind]) {
+            void hydrateKindOptions(kind);
+          }
+        }
+        return;
+      }
+
+      const clearBtn = event?.target?.closest?.("[data-local-clear]");
+      if (clearBtn && !state.disabled) {
+        const kind = String(clearBtn.getAttribute("data-kind") ?? "league");
+        const mode = String(clearBtn.getAttribute("data-local-clear") ?? "extra");
+        state.localSettings = toggleLocalExclusionId({
+          kind,
+          mode: mode === "allowed" ? "clear_allowed" : "clear_extra",
+          settings: state.localSettings,
+          globalExcludedIds:
+            kind === "nation"
+              ? state.globalSettings?.excludedNationIds
+              : state.globalSettings?.excludedLeagueIds,
+        });
+        renderKind(kind);
+        emitChange();
+        return;
+      }
+
+      const actionEl = event?.target?.closest?.("[data-local-action='toggle']");
+      if (!actionEl || state.disabled) return;
+      const kind = String(actionEl.getAttribute("data-kind") ?? "league");
+      const id = actionEl.getAttribute("data-id");
+      state.localSettings = toggleLocalExclusionId({
+        kind,
+        mode: "toggle",
+        id,
+        settings: state.localSettings,
+        globalExcludedIds:
+          kind === "nation"
+            ? state.globalSettings?.excludedNationIds
+            : state.globalSettings?.excludedLeagueIds,
+      });
+      renderKind(kind);
+      emitChange();
+    });
+
+    mountEl.addEventListener("input", (event) => {
+      const input = event?.target?.closest?.("[data-local-search]");
+      if (!input) return;
+      const kind = String(input.getAttribute("data-kind") ?? "league");
+      if (!(kind in state.search)) return;
+      state.search[kind] = String(input.value ?? "").trim();
+      renderKind(kind);
+    });
+
+    const api = {
+      sync({ settings = null, globalSettings = null, localSettings = null } = {}) {
+        state.baseSettings = normalizeSolverSettingsInput(
+          settings,
+          getDefaultSolverSettings(),
+        );
+        state.globalSettings = normalizeSolverSettingsInput(
+          globalSettings,
+          getDefaultSolverSettings(),
+        );
+        state.localSettings = normalizeLocalExclusionSettings(
+          localSettings ?? settings,
+          getDefaultLocalExclusionSettings(),
+        );
+        render();
+        if (state.expanded.league && !state.hydrated.league) {
+          void hydrateKindOptions("league");
+        }
+        if (state.expanded.nation && !state.hydrated.nation) {
+          void hydrateKindOptions("nation");
+        }
+      },
+      setDisabled(disabled) {
+        state.disabled = Boolean(disabled);
+        render();
+      },
+      getLocalSettings() {
+        return normalizeLocalExclusionSettings(state.localSettings);
+      },
+      getEffectiveSettings() {
+        return computeEffectiveSettings();
+      },
+      expandAll() {
+        state.expanded.league = true;
+        state.expanded.nation = true;
+        render();
+        if (!state.hydrated.league) void hydrateKindOptions("league");
+        if (!state.hydrated.nation) void hydrateKindOptions("nation");
+      },
+    };
+
+    api.sync({
+      settings: getDefaultSolverSettings(),
+      globalSettings: getDefaultSolverSettings(),
+      localSettings: getDefaultLocalExclusionSettings(),
+    });
+    return api;
   };
 
   const ensureGlobalSettingsSection = (view) => {
@@ -10759,6 +11478,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           ${renderSolverToggleFields({ scope: "multi", idPrefix: "ea-data-multisolve-setting-" })}
         </div>
 
+        <div id="ea-data-multisolve-local-exclusions"></div>
+
         <div class="ea-data-multisolve-grid">
           <div class="ea-data-multisolve-field ea-data-multisolve-field--times">
             <div class="ea-data-range__label">Times</div>
@@ -10831,11 +11552,31 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const ratingMaxInput = overlay.querySelector(
       "#ea-data-multisolve-rating-max-input",
     );
+    const localExclusionsMount = overlay.querySelector(
+      "#ea-data-multisolve-local-exclusions",
+    );
     const toggleBinder = createSolverToggleBinder({
       root: overlay,
       scope: "multi",
       idPrefix: "ea-data-multisolve-setting-",
     });
+    let syncingLocalExclusions = false;
+    const localExclusionsEditor = attachLocalExclusionsEditor(
+      localExclusionsMount,
+      {
+        idPrefix: "ea-data-multisolve-local-exclusions",
+        title: "Local Exclusions",
+        copy:
+          "These overrides only apply to this multi-solve session for the current challenge.",
+        onChange: ({ localSettings, effectiveSettings }) => {
+          if (syncingLocalExclusions) return;
+          try {
+            multiSolveOverlayState.localExclusions = localSettings;
+            multiSolveOverlayState.effectivePoolSettings = effectiveSettings;
+          } catch {}
+        },
+      },
+    );
 
     const setStatus = (text) => {
       try {
@@ -10929,9 +11670,34 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           ? multiSolveOverlayState.poolSettings
           : getDefaultSolverPoolSettings();
       const poolSettings = toggleBinder.setValues(settings, current);
+      const normalizedSettings = normalizeSolverSettingsInput(
+        settings,
+        getDefaultSolverSettings(),
+      );
+      const localSettings = normalizeLocalExclusionSettings(normalizedSettings);
       try {
         multiSolveOverlayState.poolSettings = poolSettings;
+        multiSolveOverlayState.localExclusions = localSettings;
+        multiSolveOverlayState.effectivePoolSettings = mergeLocalExclusionsIntoSettings({
+          settings: {
+            ...normalizedSettings,
+            ...poolSettings,
+          },
+          globalSettings: multiSolveOverlayState.globalSettings,
+          localSettings,
+          force: true,
+        });
       } catch {}
+      if (!syncingLocalExclusions) {
+        localExclusionsEditor?.sync({
+          settings: {
+            ...normalizedSettings,
+            ...poolSettings,
+          },
+          globalSettings: multiSolveOverlayState?.globalSettings,
+          localSettings,
+        });
+      }
       return poolSettings;
     };
 
@@ -10942,10 +11708,23 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           ? multiSolveOverlayState.poolSettings
           : getDefaultSolverPoolSettings();
       const poolSettings = toggleBinder.getValues(current);
+      const localSettings = normalizeLocalExclusionSettings(
+        multiSolveOverlayState?.localExclusions,
+        getDefaultLocalExclusionSettings(),
+      );
       try {
         multiSolveOverlayState.poolSettings = poolSettings;
+        multiSolveOverlayState.localExclusions = localSettings;
       } catch {}
-      return poolSettings;
+      return mergeLocalExclusionsIntoSettings({
+        settings: {
+          ...current,
+          ...poolSettings,
+        },
+        globalSettings: multiSolveOverlayState?.globalSettings,
+        localSettings,
+        force: true,
+      });
     };
 
     const clearNode = (node) => {
@@ -11483,6 +12262,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 
       // Update pagination/sort controls disabled state.
       try {
+        localExclusionsEditor?.setDisabled?.(isRunning);
         renderSolutions();
       } catch {}
     };
@@ -11508,7 +12288,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       multiSolveOverlayState.challengeId = key;
       try {
         syncRatingRange({ ratingMin: 0, ratingMax: 99 }, { source: "init" });
+        multiSolveOverlayState.globalSettings = getDefaultSolverSettings();
+        multiSolveOverlayState.localExclusions = getDefaultLocalExclusionSettings();
+        syncingLocalExclusions = true;
         syncPoolSettings(getDefaultSolverSettings());
+        syncingLocalExclusions = false;
       } catch {}
       try {
         if (currentChallenge?.id === challengeId)
@@ -11685,9 +12469,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         settings = getDefaultSolverSettings();
       }
       const effectiveSettings = {
-        ...settings,
-        ratingRange: ratingRangeCurrent,
         ...getPoolSettingsFromInputs(),
+        ratingRange: ratingRangeCurrent,
       };
       const requiredIds = new Set();
       try {
@@ -12130,9 +12913,13 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       ratingMinInput,
       ratingMaxInput,
       toggleBinder,
+      localExclusionsEditor,
       setStatus,
       ratingRange: ratingRangeCurrent,
+      globalSettings: getDefaultSolverSettings(),
       poolSettings: getDefaultSolverPoolSettings(),
+      localExclusions: getDefaultLocalExclusionSettings(),
+      effectivePoolSettings: getDefaultSolverSettings(),
       challengeId: null,
       solutions: [],
       activeIndex: 0,
@@ -12236,11 +13023,22 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       !multiSolveOverlayState?.poolSettings
     ) {
       try {
+        const globalSettings = await getSolverSettingsForChallenge(null).catch(
+          () => getDefaultSolverSettings(),
+        );
         const settings = await getSolverSettingsForChallenge(challengeId);
+        multiSolveOverlayState.globalSettings = globalSettings;
         multiSolveOverlayState?.syncRatingRange?.(settings?.ratingRange, {
           source: "open",
         });
+        syncingLocalExclusions = true;
         multiSolveOverlayState?.syncPoolSettings?.(settings);
+        syncingLocalExclusions = false;
+        multiSolveOverlayState?.localExclusionsEditor?.sync?.({
+          settings,
+          globalSettings,
+          localSettings: normalizeLocalExclusionSettings(settings),
+        });
       } catch {}
     }
     overlay.setAttribute("aria-hidden", "false");
@@ -12302,6 +13100,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         <div class="ea-data-toggle-list">
           ${renderSolverToggleFields({ scope: "set", idPrefix: "ea-data-setsolve-setting-" })}
         </div>
+
+        <div id="ea-data-setsolve-local-exclusions"></div>
 
         <div class="ea-data-settings-section-label" style="margin-top:12px">Set Submission Cycles</div>
         <label class="ea-data-toggle-row" for="ea-data-setsolve-multi-enabled">
@@ -12414,11 +13214,32 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const ratingMaxInput = overlay.querySelector(
       "#ea-data-setsolve-rating-max-input",
     );
+    const localExclusionsMount = overlay.querySelector(
+      "#ea-data-setsolve-local-exclusions",
+    );
     const toggleBinder = createSolverToggleBinder({
       root: overlay,
       scope: "set",
       idPrefix: "ea-data-setsolve-setting-",
     });
+    let syncingLocalExclusions = false;
+    const localExclusionsEditor = attachLocalExclusionsEditor(
+      localExclusionsMount,
+      {
+        idPrefix: "ea-data-setsolve-local-exclusions",
+        title: "Set-Local Exclusions",
+        copy:
+          "These overrides persist per SBC set and layer on top of your global exclusions.",
+        onChange: ({ localSettings, effectiveSettings }) => {
+          if (syncingLocalExclusions) return;
+          try {
+            setSolveOverlayState.localExclusions = localSettings;
+            setSolveOverlayState.effectivePoolSettings = effectiveSettings;
+            void setSolveOverlayState?.persistLocalExclusions?.();
+          } catch {}
+        },
+      },
+    );
 
     const setStatus = (text) => {
       try {
@@ -14429,9 +15250,36 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           ? setSolveOverlayState.poolSettings
           : getDefaultSolverPoolSettings();
       const poolSettings = toggleBinder.setValues(settings, current);
+      const normalizedSettings = normalizeSolverSettingsInput(
+        settings,
+        getDefaultSolverSettings(),
+      );
+      const localSettings = normalizeLocalExclusionSettings(
+        setSolveOverlayState?.localExclusions ?? normalizedSettings,
+        getDefaultLocalExclusionSettings(),
+      );
       try {
         setSolveOverlayState.poolSettings = poolSettings;
+        setSolveOverlayState.effectivePoolSettings = mergeLocalExclusionsIntoSettings({
+          settings: {
+            ...normalizedSettings,
+            ...poolSettings,
+          },
+          globalSettings: setSolveOverlayState.globalSettings,
+          localSettings,
+          force: true,
+        });
       } catch {}
+      if (!syncingLocalExclusions) {
+        localExclusionsEditor?.sync({
+          settings: {
+            ...normalizedSettings,
+            ...poolSettings,
+          },
+          globalSettings: setSolveOverlayState?.globalSettings,
+          localSettings,
+        });
+      }
       return poolSettings;
     };
 
@@ -14442,10 +15290,23 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           ? setSolveOverlayState.poolSettings
           : getDefaultSolverPoolSettings();
       const poolSettings = toggleBinder.getValues(current);
+      const localSettings = normalizeLocalExclusionSettings(
+        setSolveOverlayState?.localExclusions,
+        getDefaultLocalExclusionSettings(),
+      );
       try {
         setSolveOverlayState.poolSettings = poolSettings;
+        setSolveOverlayState.localExclusions = localSettings;
       } catch {}
-      return poolSettings;
+      return mergeLocalExclusionsIntoSettings({
+        settings: {
+          ...current,
+          ...poolSettings,
+        },
+        globalSettings: setSolveOverlayState?.globalSettings,
+        localSettings,
+        force: true,
+      });
     };
 
     const getSubmittableEntriesForCurrentMode = () => {
@@ -14806,6 +15667,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           startBtn.textContent = "Start Submitting";
         }
       } catch {}
+      try {
+        localExclusionsEditor?.setDisabled?.(isRunning);
+      } catch {}
       syncSetCycleControls();
       renderEntries();
     };
@@ -14875,7 +15739,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       renderSetSolveRightPanel({ reason: "context-reset" });
       try {
         syncRatingRange({ ratingMin: 0, ratingMax: 99 }, { source: "init" });
+        setSolveOverlayState.globalSettings = getDefaultSolverSettings();
+        setSolveOverlayState.localExclusions = getDefaultLocalExclusionSettings();
+        syncingLocalExclusions = true;
         syncPoolSettings(getDefaultSolverSettings());
+        syncingLocalExclusions = false;
         syncSetCycleRepeatability(setId, { resetRequested: true });
 
         // Trigger a fresh challenge fetch for the picker UI when context changes
@@ -14988,9 +15856,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           settings = getDefaultSolverSettings();
         }
         const effectiveSettings = {
-          ...settings,
-          ratingRange: ratingRangeCurrent,
           ...getPoolSettingsFromInputs(),
+          ratingRange: ratingRangeCurrent,
         };
 
         const allPlayers = Array.isArray(payload?.players)
@@ -16492,9 +17359,13 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       setCyclesInput,
       setCyclesMetaEl,
       toggleBinder,
+      localExclusionsEditor,
       setStatus,
       ratingRange: ratingRangeCurrent,
+      globalSettings: getDefaultSolverSettings(),
       poolSettings: getDefaultSolverPoolSettings(),
+      localExclusions: getDefaultLocalExclusionSettings(),
+      effectivePoolSettings: getDefaultSolverSettings(),
       challengeId: null,
       setId: null,
       setName: null,
@@ -16528,6 +17399,15 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       syncSetCycleRepeatability,
       renderRightPanel: renderSetSolveRightPanel,
       refreshRequirements: refreshSetSolveRequirements,
+      persistLocalExclusions: async () => {
+        const setId = readNumeric(setSolveOverlayState?.setId);
+        if (setId == null) return;
+        const localSettings = normalizeLocalExclusionSettings(
+          setSolveOverlayState?.localExclusions,
+          getDefaultLocalExclusionSettings(),
+        );
+        await setSetSolverLocalExclusions(setId, localSettings);
+      },
     };
 
     const overlayTitle = overlay.querySelector("#ea-data-setsolve-title");
@@ -16702,11 +17582,26 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       !setSolveOverlayState?.poolSettings
     ) {
       try {
+        const globalSettings = await getSolverSettingsForChallenge(null).catch(
+          () => getDefaultSolverSettings(),
+        );
         const settings = await getSolverSettingsForChallenge(challengeId);
+        const localExclusions = await getSetSolverLocalExclusions(setId).catch(
+          () => getDefaultLocalExclusionSettings(),
+        );
+        setSolveOverlayState.globalSettings = globalSettings;
+        setSolveOverlayState.localExclusions = localExclusions;
         setSolveOverlayState?.syncRatingRange?.(settings?.ratingRange, {
           source: "open",
         });
+        syncingLocalExclusions = true;
         setSolveOverlayState?.syncPoolSettings?.(settings);
+        setSolveOverlayState?.localExclusionsEditor?.sync?.({
+          settings,
+          globalSettings,
+          localSettings: localExclusions,
+        });
+        syncingLocalExclusions = false;
       } catch {}
     }
     try {
@@ -16849,14 +17744,6 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     );
     const tabButtons = overlay.querySelectorAll(".ea-data-sequence-tab");
     const tabPanels = overlay.querySelectorAll(".ea-data-sequence-tab-panel");
-
-    const escapeHtml = (value) =>
-      String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
 
     const formatShortDate = (value) => {
       const at = readNumeric(value);
@@ -18013,10 +18900,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                               validation.reason,
                             )}</div>`
                       }
-                      <div class="ea-data-sequence-step-grid">
-                        <div class="ea-data-sequence-field">
-                          <label class="ea-data-sequence-label">Rating Range</label>
-                          <div class="ea-data-sequence-range-row">
+        <div class="ea-data-sequence-step-grid">
+          <div class="ea-data-sequence-field">
+            <label class="ea-data-sequence-label">Rating Range</label>
+            <div class="ea-data-sequence-range-row">
                             <input class="ea-data-sequence-input" type="number" min="0" max="99" step="1" value="${escapeHtml(
                               normalizedStep?.settingsSnapshot?.ratingRange
                                 ?.ratingMin ?? 0,
@@ -18031,14 +18918,20 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                             )}" data-step-field="ratingMax" ${isRunning ? "disabled" : ""} />
                           </div>
                         </div>
-                        <div class="ea-data-sequence-field ea-data-sequence-field--span-2">
-                          <label class="ea-data-sequence-label">Pool Options</label>
-                          <div class="ea-data-sequence-toggle-list">${toggleRows}</div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+          <div class="ea-data-sequence-field ea-data-sequence-field--span-2">
+            <label class="ea-data-sequence-label">Pool Options</label>
+            <div class="ea-data-sequence-toggle-list">${toggleRows}</div>
+          </div>
+        </div>
+        <div class="ea-data-sequence-field ea-data-sequence-field--span-2">
+          <label class="ea-data-sequence-label">Local Exclusions</label>
+          <div class="ea-data-local-exclusions" data-sequence-local-editor="${escapeHtml(
+            normalizedStep?.id,
+          )}"></div>
+        </div>
+      </div>
+    </div>
+  </div>
               `;
             })
             .join("")
@@ -18050,6 +18943,45 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           '<div class="ea-data-sequence-empty">No steps configured yet.</div>'
         }</div>
       `;
+
+      const globalSettings = normalizeSolverSettingsInput(
+        sequenceSolveOverlayState?.defaultSettings,
+        getDefaultSolverSettings(),
+      );
+      const editors = stepsPanelEl
+        ? Array.from(stepsPanelEl.querySelectorAll("[data-sequence-local-editor]"))
+        : [];
+      for (const mount of editors) {
+        const stepId = mount.getAttribute("data-sequence-local-editor");
+        const step = plan?.steps?.find(
+          (entry) => String(entry?.id) === String(stepId),
+        );
+        if (!step) continue;
+        const editor = attachLocalExclusionsEditor(mount, {
+          idPrefix: `ea-data-sequence-local-${String(stepId)}`,
+          title: "Step-Local Exclusions",
+          copy:
+            "These overrides only apply while this step runs and are saved in the step snapshot.",
+          onChange: ({ localSettings, effectiveSettings }) => {
+            step.settingsSnapshot = normalizeSolverSettingsInput(
+              {
+                ...effectiveSettings,
+                ...localSettings,
+              },
+              sequenceSolveOverlayState?.defaultSettings ??
+                getDefaultSolverSettings(),
+            );
+            touchPlans();
+          },
+        });
+        editor?.sync({
+          settings: step?.settingsSnapshot,
+          globalSettings,
+          localSettings: normalizeLocalExclusionSettings(step?.settingsSnapshot),
+        });
+        editor?.expandAll?.();
+        editor?.setDisabled?.(isRunning);
+      }
     };
 
     const syncActions = () => {
@@ -20895,10 +21827,15 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     SOLVER_ONLY_STORAGE: "solver.onlyStorage",
     SOLVER_EXCLUDE_TRADABLE: "solver.excludeTradable",
     SOLVER_EXCLUDE_SPECIAL: "solver.excludeSpecial",
+    SOLVER_USE_TOTW_PLAYERS: "solver.useTotwPlayers",
     SOLVER_USE_EVOLUTION_PLAYERS: "solver.useEvolutionPlayers",
     SOLVER_EXCLUDED_PLAYER_IDS: "solver.excludedPlayerIds",
     SOLVER_EXCLUDED_LEAGUE_IDS: "solver.excludedLeagueIds",
     SOLVER_EXCLUDED_NATION_IDS: "solver.excludedNationIds",
+    SOLVER_ALLOWED_GLOBAL_LEAGUE_IDS: "solver.allowedGlobalLeagueIds",
+    SOLVER_ALLOWED_GLOBAL_NATION_IDS: "solver.allowedGlobalNationIds",
+    SOLVER_EXTRA_EXCLUDED_LEAGUE_IDS: "solver.extraExcludedLeagueIds",
+    SOLVER_EXTRA_EXCLUDED_NATION_IDS: "solver.extraExcludedNationIds",
   });
   const SETTINGS_DEFAULTS = Object.freeze({
     solver: Object.freeze({
@@ -20910,10 +21847,15 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       onlyStorage: false,
       excludeTradable: true,
       excludeSpecial: false,
+      useTotwPlayers: true,
       useEvolutionPlayers: false,
       excludedPlayerIds: Object.freeze([]),
       excludedLeagueIds: Object.freeze([]),
       excludedNationIds: Object.freeze([]),
+      allowedGlobalLeagueIds: Object.freeze([]),
+      allowedGlobalNationIds: Object.freeze([]),
+      extraExcludedLeagueIds: Object.freeze([]),
+      extraExcludedNationIds: Object.freeze([]),
     }),
   });
   const SOLVER_TOGGLE_FIELDS = Object.freeze([
@@ -20949,7 +21891,16 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       path: SETTINGS_PATHS.SOLVER_EXCLUDE_SPECIAL,
       idSuffix: "exclude-special",
       label: "Exclude Special",
-      help: "Prefer non-special cards for cheaper submissions.",
+      help: "Avoid using special cards except TOTW/inform items. TOTW is controlled separately.",
+      scopes: Object.freeze(["challenge", "global", "multi", "set"]),
+      legacyKeys: Object.freeze([]),
+    }),
+    Object.freeze({
+      key: "useTotwPlayers",
+      path: SETTINGS_PATHS.SOLVER_USE_TOTW_PLAYERS,
+      idSuffix: "use-totw-players",
+      label: "Use TOTW Players",
+      help: "Allow Team of the Week / inform cards in solver pools and rating optimization.",
       scopes: Object.freeze(["challenge", "global", "multi", "set"]),
       legacyKeys: Object.freeze([]),
     }),
@@ -21390,6 +22341,13 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     if (excludedNationIds != null) {
       solver.excludedNationIds = excludedNationIds;
     }
+    const localExclusions = normalizeLocalExclusionSettings(solverRaw, {});
+    for (const field of LOCAL_EXCLUSION_FIELDS) {
+      const values = Array.isArray(localExclusions?.[field])
+        ? localExclusions[field]
+        : [];
+      if (values.length) solver[field] = values;
+    }
     if (hasAnyOwnKeys(solver)) normalized.solver = solver;
     return normalized;
   };
@@ -21415,6 +22373,26 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     if (path === SETTINGS_PATHS.SOLVER_EXCLUDED_NATION_IDS) {
       return normalizeNationIdList(
         SETTINGS_DEFAULTS?.solver?.excludedNationIds,
+      );
+    }
+    if (path === SETTINGS_PATHS.SOLVER_ALLOWED_GLOBAL_LEAGUE_IDS) {
+      return normalizeLeagueIdList(
+        SETTINGS_DEFAULTS?.solver?.allowedGlobalLeagueIds,
+      );
+    }
+    if (path === SETTINGS_PATHS.SOLVER_ALLOWED_GLOBAL_NATION_IDS) {
+      return normalizeNationIdList(
+        SETTINGS_DEFAULTS?.solver?.allowedGlobalNationIds,
+      );
+    }
+    if (path === SETTINGS_PATHS.SOLVER_EXTRA_EXCLUDED_LEAGUE_IDS) {
+      return normalizeLeagueIdList(
+        SETTINGS_DEFAULTS?.solver?.extraExcludedLeagueIds,
+      );
+    }
+    if (path === SETTINGS_PATHS.SOLVER_EXTRA_EXCLUDED_NATION_IDS) {
+      return normalizeNationIdList(
+        SETTINGS_DEFAULTS?.solver?.extraExcludedNationIds,
       );
     }
     return null;
@@ -21449,6 +22427,30 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         getSettingDefault(SETTINGS_PATHS.SOLVER_EXCLUDED_NATION_IDS),
       );
     }
+    if (path === SETTINGS_PATHS.SOLVER_ALLOWED_GLOBAL_LEAGUE_IDS) {
+      return normalizeLeagueIdList(
+        value,
+        getSettingDefault(SETTINGS_PATHS.SOLVER_ALLOWED_GLOBAL_LEAGUE_IDS),
+      );
+    }
+    if (path === SETTINGS_PATHS.SOLVER_ALLOWED_GLOBAL_NATION_IDS) {
+      return normalizeNationIdList(
+        value,
+        getSettingDefault(SETTINGS_PATHS.SOLVER_ALLOWED_GLOBAL_NATION_IDS),
+      );
+    }
+    if (path === SETTINGS_PATHS.SOLVER_EXTRA_EXCLUDED_LEAGUE_IDS) {
+      return normalizeLeagueIdList(
+        value,
+        getSettingDefault(SETTINGS_PATHS.SOLVER_EXTRA_EXCLUDED_LEAGUE_IDS),
+      );
+    }
+    if (path === SETTINGS_PATHS.SOLVER_EXTRA_EXCLUDED_NATION_IDS) {
+      return normalizeNationIdList(
+        value,
+        getSettingDefault(SETTINGS_PATHS.SOLVER_EXTRA_EXCLUDED_NATION_IDS),
+      );
+    }
     return value;
   };
 
@@ -21466,6 +22468,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       SETTINGS_PATHS.SOLVER_EXCLUDED_PLAYER_IDS,
       SETTINGS_PATHS.SOLVER_EXCLUDED_LEAGUE_IDS,
       SETTINGS_PATHS.SOLVER_EXCLUDED_NATION_IDS,
+      SETTINGS_PATHS.SOLVER_ALLOWED_GLOBAL_LEAGUE_IDS,
+      SETTINGS_PATHS.SOLVER_ALLOWED_GLOBAL_NATION_IDS,
+      SETTINGS_PATHS.SOLVER_EXTRA_EXCLUDED_LEAGUE_IDS,
+      SETTINGS_PATHS.SOLVER_EXTRA_EXCLUDED_NATION_IDS,
     ];
     for (const settingPath of globalDefaults) {
       if (hasSettingByPath(global, settingPath)) continue;
@@ -21499,6 +22505,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             activePlanId: null,
             plans: [],
           };
+    const setExclusions = normalizeSetLocalExclusionsStore(
+      rawSolver?.setExclusions,
+    );
     const rawNux = raw?.nux && typeof raw.nux === "object" ? raw.nux : {};
     const releaseNotes = normalizeReleaseNotesState(rawNux?.releaseNotes);
 
@@ -21513,6 +22522,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         features: {
           sequenceV1: rawSolverFeatures?.sequenceV1 !== false,
         },
+        setExclusions,
         sequencePlans: rawSequencePlans,
       },
     };
@@ -21676,6 +22686,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     excludedNationIds: getSettingDefault(
       SETTINGS_PATHS.SOLVER_EXCLUDED_NATION_IDS,
     ),
+    ...getDefaultLocalExclusionSettings(),
   });
 
   const normalizeSolverSettingsInput = (value, fallback = null) => {
@@ -21718,12 +22729,21 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       raw?.excludedNationIds ?? raw?.excludedNations,
       fallbackExcludedNationIds,
     );
+    const fallbackLocalExclusions = normalizeLocalExclusionSettings(
+      fallbackSettings,
+      getDefaultLocalExclusionSettings(),
+    );
+    const localExclusions = normalizeLocalExclusionSettings(
+      raw,
+      fallbackLocalExclusions,
+    );
     return {
       ratingRange: normalizeRatingRange(ratingRangeRaw ?? fallbackRange),
       ...normalizedPool,
       excludedPlayerIds,
       excludedLeagueIds,
       excludedNationIds,
+      ...localExclusions,
     };
   };
 
@@ -21732,6 +22752,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     { challengeId = null, sessionScope = null, fallback = null } = {},
   ) => {
     const defaults = normalizeSolverSettingsInput(fallback);
+    const globalDefaults = normalizeSolverSettingsInput(
+      getSettingByPath(prefs?.global, "solver") ?? null,
+      defaults,
+    );
     const resolved = {
       ratingRange: resolveEffectiveSettingFromPreferences(prefs, {
         challengeId,
@@ -21772,7 +22796,27 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       globalExcludedNationIds,
       defaults.excludedNationIds,
     );
-    return normalizeSolverSettingsInput(resolved, defaults);
+    for (const field of LOCAL_EXCLUSION_FIELDS) {
+      const path =
+        field === "allowedGlobalLeagueIds"
+          ? SETTINGS_PATHS.SOLVER_ALLOWED_GLOBAL_LEAGUE_IDS
+          : field === "allowedGlobalNationIds"
+            ? SETTINGS_PATHS.SOLVER_ALLOWED_GLOBAL_NATION_IDS
+            : field === "extraExcludedLeagueIds"
+              ? SETTINGS_PATHS.SOLVER_EXTRA_EXCLUDED_LEAGUE_IDS
+              : SETTINGS_PATHS.SOLVER_EXTRA_EXCLUDED_NATION_IDS;
+      resolved[field] = resolveEffectiveSettingFromPreferences(prefs, {
+        challengeId,
+        sessionScope,
+        path,
+        fallback: defaults[field],
+      });
+    }
+    const withLocalExclusions = applyLocalExclusionsToSettings({
+      settings: resolved,
+      globalSettings: globalDefaults,
+    });
+    return normalizeSolverSettingsInput(withLocalExclusions, defaults);
   };
 
   const getSolverSettingsForChallenge = async (
@@ -21842,8 +22886,52 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     for (const field of SOLVER_TOGGLE_FIELDS) {
       setSettingByPathMut(scope, field.path, normalized[field.key]);
     }
+    setSettingByPathMut(
+      scope,
+      SETTINGS_PATHS.SOLVER_ALLOWED_GLOBAL_LEAGUE_IDS,
+      normalizeLeagueIdList(normalized.allowedGlobalLeagueIds),
+    );
+    setSettingByPathMut(
+      scope,
+      SETTINGS_PATHS.SOLVER_ALLOWED_GLOBAL_NATION_IDS,
+      normalizeNationIdList(normalized.allowedGlobalNationIds),
+    );
+    setSettingByPathMut(
+      scope,
+      SETTINGS_PATHS.SOLVER_EXTRA_EXCLUDED_LEAGUE_IDS,
+      normalizeLeagueIdList(normalized.extraExcludedLeagueIds),
+    );
+    setSettingByPathMut(
+      scope,
+      SETTINGS_PATHS.SOLVER_EXTRA_EXCLUDED_NATION_IDS,
+      normalizeNationIdList(normalized.extraExcludedNationIds),
+    );
     next.perChallenge[key] = scope;
     return savePreferences(next);
+  };
+
+  const getSetLocalExclusionsStoreFromPreferences = (prefs) =>
+    normalizeSetLocalExclusionsStore(prefs?.solver?.setExclusions);
+
+  const getSetSolverLocalExclusions = async (setId) => {
+    const prefs = await getPreferences();
+    return getSetLocalExclusionSettings(
+      getSetLocalExclusionsStoreFromPreferences(prefs),
+      setId,
+    );
+  };
+
+  const setSetSolverLocalExclusions = async (setId, settings) => {
+    const prefs = await getPreferences();
+    const next = clonePlainObject(prefs);
+    if (!next.solver || typeof next.solver !== "object") next.solver = {};
+    next.solver.setExclusions = setSetLocalExclusionSettings(
+      next.solver?.setExclusions,
+      setId,
+      settings,
+    );
+    const saved = await savePreferences(next);
+    return getSetLocalExclusionSettings(saved?.solver?.setExclusions, setId);
   };
 
   const SEQUENCE_FEATURE_FLAG_PATH = "solver.features.sequenceV1";
@@ -22393,6 +23481,21 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     return Boolean(player.upgrades);
   };
 
+  const isTotwPlayer = (player) => {
+    if (!player || typeof player !== "object") return false;
+    const rarityName = String(player?.rarityName ?? "")
+      .trim()
+      .toLowerCase();
+    if (
+      rarityName.includes("team of the week") ||
+      rarityName.includes("totw") ||
+      rarityName.includes("inform")
+    ) {
+      return true;
+    }
+    return readNumeric(player?.rarityId) === 3;
+  };
+
   const filterPlayersBySolverPoolSettings = (
     players,
     settings,
@@ -22410,6 +23513,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const onlyStorage = Boolean(poolSettings?.onlyStorage);
     const excludeTradable = Boolean(poolSettings?.excludeTradable);
     const excludeSpecial = Boolean(poolSettings?.excludeSpecial);
+    const useTotwPlayers = Boolean(poolSettings?.useTotwPlayers);
     const useEvolutionPlayers = Boolean(poolSettings?.useEvolutionPlayers);
     const excludedPlayerIds = normalizePlayerIdList(
       normalized?.excludedPlayerIds,
@@ -22455,10 +23559,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       if (id != null && required.has(String(id))) return true;
       // Intentional precedence: evo hard-block runs before unassigned bypass.
       if (!useEvolutionPlayers && isEvolutionPlayer(player)) return false;
+      const isTotw = isTotwPlayer(player);
+      if (!useTotwPlayers && isTotw) return false;
       if (useUnassigned && player?.isDuplicate) return true;
       if (onlyStorage && !player?.isStorage) return false;
       if (excludeTradable && Boolean(player?.isTradeable)) return false;
-      if (excludeSpecial && Boolean(player?.isSpecial)) return false;
+      if (excludeSpecial && Boolean(player?.isSpecial) && !isTotw) return false;
       const rating = readNumeric(player?.rating);
       return rating != null && rating >= ratingMin && rating <= ratingMax;
     });
@@ -25066,6 +26172,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const duplicateDefIds = options?.duplicateDefIds ?? null;
     const source = options?.source ?? null;
     const rarityId = item.rareflag ?? item.rarityId ?? item.rarity ?? null;
+    const rarityName = getRarityName(rarityId);
     const isSpecial =
       typeof item.isSpecial === "function"
         ? item.isSpecial()
@@ -25074,6 +26181,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           : rarityId != null
             ? rarityId > 1
             : null;
+    const isTotw = isTotwPlayer({ rarityId, rarityName });
     const preferredPositionId =
       item.preferredPosition ??
       item.preferredPositionId ??
@@ -25132,8 +26240,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       upgrades: item.upgrades,
       isEnrolledInAcademy: item.isEnrolledInAcademy?.(),
       rarityId,
-      rarityName: getRarityName(rarityId),
+      rarityName,
       isSpecial,
+      isTotw,
       isEvolution,
       preferredPositionId,
       preferredPositionName,
@@ -25830,6 +26939,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     toggleGlobalExcludedNationId: async (nationId, excluded = true) =>
       toggleGlobalExcludedNationId(nationId, excluded),
     clearGlobalExcludedNationIds: async () => clearGlobalExcludedNationIds(),
+    getSetSolverLocalExclusions: async (setId = currentSbcSet?.id ?? null) =>
+      getSetSolverLocalExclusions(setId),
+    setSetSolverLocalExclusions: async (
+      setId = currentSbcSet?.id ?? null,
+      settings = {},
+    ) => setSetSolverLocalExclusions(setId, settings),
     getGlobalRatingRange: async () =>
       (await getSolverSettingsForChallenge(null)).ratingRange,
     setGlobalRatingRange: async (range) => setGlobalRatingRange(range),

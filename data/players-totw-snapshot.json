@@ -1,0 +1,64 @@
+{
+  "players": [
+    {
+      "id": 769736146992,
+      "definitionId": 67373832,
+      "rating": 87,
+      "leagueId": 2218,
+      "nationId": 18,
+      "teamId": 132370,
+      "rarityId": 3,
+      "rarityName": "Team of the Week",
+      "isSpecial": true,
+      "preferredPositionName": "ST"
+    },
+    {
+      "id": 763651525742,
+      "definitionId": 241637,
+      "rating": 86,
+      "leagueId": 13,
+      "nationId": 45,
+      "teamId": 1,
+      "rarityId": 3,
+      "rarityName": "Team of the Week",
+      "isSpecial": true,
+      "preferredPositionName": "CM"
+    },
+    {
+      "id": 769736146990,
+      "definitionId": 50579161,
+      "rating": 87,
+      "leagueId": 2215,
+      "nationId": 70,
+      "teamId": 115995,
+      "rarityId": 55,
+      "rarityName": "Knockout Royalty",
+      "isSpecial": true,
+      "preferredPositionName": "RM"
+    },
+    {
+      "id": 765493455676,
+      "definitionId": 212831,
+      "rating": 89,
+      "leagueId": 13,
+      "nationId": 54,
+      "teamId": 9,
+      "rarityId": 1,
+      "rarityName": "Rare",
+      "isSpecial": false,
+      "preferredPositionName": "GK"
+    },
+    {
+      "id": 769736210674,
+      "definitionId": 241651,
+      "rating": 87,
+      "leagueId": 13,
+      "nationId": 46,
+      "teamId": 1,
+      "rarityId": 1,
+      "rarityName": "Rare",
+      "isSpecial": false,
+      "preferredPositionName": "ST"
+    }
+  ]
+}

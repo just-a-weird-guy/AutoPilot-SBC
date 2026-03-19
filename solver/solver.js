@@ -3,6 +3,7 @@ import {
   computeBestChemistryAssignment,
   normalizeSlotsForChemistry,
 } from "./chemistry.js";
+import { isTotwPlayer } from "./pool-filter.js";
 
 const ROUND_DECIMALS = 2;
 const ROUND_THRESHOLD = 0.96;
@@ -315,6 +316,11 @@ const normalizePlayers = (players) => {
       typeof item.isSpecial === "function"
         ? Boolean(item.isSpecial())
         : Boolean(item.isSpecial);
+    const rarityName = item.rarityName ? String(item.rarityName) : null;
+    const isTotw = isTotwPlayer({
+      rarityName,
+      rarityId: item?.rarityId ?? null,
+    });
     const isEvolution =
       typeof item.isEvolution === "function"
         ? Boolean(item.isEvolution())
@@ -323,11 +329,12 @@ const normalizePlayers = (players) => {
       ...item,
       rating,
       quality: getPlayerQuality(rating),
-      rarityName: item.rarityName ? String(item.rarityName) : null,
+      rarityName,
       isStorage: Boolean(item.isStorage),
       isUntradeable: Boolean(item.isUntradeable),
       isDuplicate: Boolean(item.isDuplicate),
       isSpecial,
+      isTotw,
       isEvolution,
     });
   }
@@ -417,6 +424,7 @@ export const buildSolverContext = ({
     onlyUntradeables: toBooleanSetting(filters?.onlyUntradeables, false),
     onlyDuplicates: toBooleanSetting(filters?.onlyDuplicates, false),
     excludeSpecial: toBooleanSetting(filters?.excludeSpecial, false),
+    useTotwPlayers: toBooleanSetting(filters?.useTotwPlayers, true),
     useEvolutionPlayers: toBooleanSetting(filters?.useEvolutionPlayers, false),
     preserveOccupiedSlots: toBooleanSetting(
       filters?.preserveOccupiedSlots,
@@ -456,6 +464,20 @@ export const buildSolverContext = ({
     normalizedPlayers = normalizedPlayers.filter(
       (player) => player.isDuplicate,
     );
+  }
+  if (!normalizedFilters.useTotwPlayers) {
+    normalizedPlayers = normalizedPlayers.filter((player) => {
+      if (!player?.isTotw) return true;
+      if (player?.id == null) return false;
+      return lockedSlotPlayerIds.has(String(player.id));
+    });
+  }
+  if (normalizedFilters.excludeSpecial) {
+    normalizedPlayers = normalizedPlayers.filter((player) => {
+      if (!player?.isSpecial || player?.isTotw) return true;
+      if (player?.id == null) return false;
+      return lockedSlotPlayerIds.has(String(player.id));
+    });
   }
   if (prioritize?.duplicates) {
     normalizedPlayers = normalizedPlayers
@@ -733,10 +755,12 @@ const getRarityHint = (rule) => {
 
 const isInformPlayer = (player) => {
   const rarity = normalizeString(player?.rarityName);
-  if (!rarity) return false;
-  if (rarity.includes("team of the week")) return true;
-  if (rarity.includes("totw")) return true;
-  if (rarity.includes("inform")) return true;
+  if (rarity) {
+    if (rarity.includes("team of the week")) return true;
+    if (rarity.includes("totw")) return true;
+    if (rarity.includes("inform")) return true;
+  }
+  if (toNumber(player?.rarityId) === 3) return true;
   return false;
 };
 
@@ -4089,7 +4113,11 @@ export const solveSquad = (context) => {
     context?.filters?.excludeSpecial,
     false,
   );
-  const preferLowerExcessInformsDuringSolve = excludeSpecial;
+  const useTotwPlayers = toBooleanSetting(
+    context?.filters?.useTotwPlayers,
+    true,
+  );
+  const preferLowerExcessInformsDuringSolve = !useTotwPlayers;
   const allowsNonSpecialPreference =
     excludeSpecial &&
     (!specialRule ||
@@ -4280,7 +4308,7 @@ export const solveSquad = (context) => {
           maxIterations: context?.optimize?.ratingMaxIterations ?? 80,
           capOffset: context?.optimize?.ratingCapOffset ?? 2,
           requiredInforms: informBounds?.min ?? 0,
-          avoidInforms: excludeSpecial
+          avoidInforms: !useTotwPlayers
             ? context?.optimize?.avoidInforms !== false
             : false,
           preferLowerExcessInforms: preferLowerExcessInformsDuringSolve,
@@ -4392,7 +4420,7 @@ export const solveSquad = (context) => {
           ratingTarget: ratingRequirement?.target ?? null,
           pivot: context?.optimize?.preservePivot ?? null,
           requiredInforms: informBounds?.min ?? 0,
-          avoidInforms: excludeSpecial
+          avoidInforms: !useTotwPlayers
             ? context?.optimize?.avoidInforms !== false
             : false,
           preferLowerExcessInforms: preferLowerExcessInformsDuringSolve,

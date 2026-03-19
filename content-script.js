@@ -91,7 +91,9 @@ void (async () => {
   if (window !== window.top) return;
   await exposeExtensionMetadataToPage();
   const bridgePath = "page/ea-data-bridge.js";
+  const localExclusionsSharedPath = "page/local-exclusions-shared.js";
   try {
+    await injectPageScript(localExclusionsSharedPath, { type: null });
     await injectPageScript(bridgePath, { type: "module" });
   } catch (error) {
     console.warn("[EA Data] Module script injection failed; retrying classic", {
@@ -101,12 +103,14 @@ void (async () => {
       message: error?.message ?? String(error),
     });
     try {
+      await injectPageScript(localExclusionsSharedPath, { type: null });
       await injectPageScript(bridgePath, { type: null });
       console.warn("[EA Data] Classic script injection fallback succeeded", {
         path: bridgePath,
       });
     } catch (fallbackError) {
       try {
+        await requestBackgroundBridgeInject(localExclusionsSharedPath);
         await requestBackgroundBridgeInject(bridgePath);
         console.warn(
           "[EA Data] Background executeScript injection fallback succeeded",

@@ -2,7 +2,10 @@ const SOLVER_BRIDGE_REQUEST = "EA_SOLVER_REQUEST";
 const SOLVER_PORT_NAME = "EA_SOLVER_PORT";
 const WORKER_RESPONSE = "SOLVER_WORKER_RESPONSE";
 const BRIDGE_INJECT_REQUEST = "EA_PAGE_BRIDGE_INJECT";
-const ALLOWED_BRIDGE_INJECT_PATHS = new Set(["page/ea-data-bridge.js"]);
+const ALLOWED_BRIDGE_INJECT_PATHS = new Set([
+  "page/ea-data-bridge.js",
+  "page/local-exclusions-shared.js",
+]);
 const EA_WEBAPP_URL_RE =
   /^https:\/\/www\.ea\.com(?:\/[^/?#]+)?\/ea-sports-fc\/ultimate-team\/web-app(?:\/|$)/i;
 import {
