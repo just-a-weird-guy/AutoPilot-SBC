@@ -821,6 +821,178 @@
       .replace(/\"/g, "&quot;")
       .replace(/'/g, "&#39;");
 
+  const resolvePreviewPositionName = (slotIndexToPos, slotIndex) => {
+    if (slotIndex == null || !slotIndexToPos) return null;
+    if (slotIndexToPos instanceof Map) {
+      return slotIndexToPos.get(Number(slotIndex)) ?? null;
+    }
+    if (Array.isArray(slotIndexToPos)) {
+      for (const pair of slotIndexToPos) {
+        if (!Array.isArray(pair) || pair.length < 2) continue;
+        if (Number(pair[0]) === Number(slotIndex)) {
+          return pair[1] ?? null;
+        }
+      }
+      return null;
+    }
+    if (typeof slotIndexToPos === "object") {
+      return (
+        slotIndexToPos[slotIndex] ?? slotIndexToPos[String(slotIndex)] ?? null
+      );
+    }
+    return null;
+  };
+
+  const buildPreviewRows = ({
+    solutionIds = [],
+    slotSolution = null,
+    playerById = null,
+    slotIndexToPositionName = null,
+    sortKey = "slot",
+  } = {}) => {
+    const ids = Array.isArray(solutionIds) ? solutionIds : [];
+    const slotIndices = Array.isArray(slotSolution?.fieldSlotIndices)
+      ? slotSolution.fieldSlotIndices
+      : null;
+    const slotPlayerIds = Array.isArray(slotSolution?.fieldSlotToPlayerId)
+      ? slotSolution.fieldSlotToPlayerId
+      : null;
+    const perChem = Array.isArray(slotSolution?.perPlayerChem)
+      ? slotSolution.perPlayerChem
+      : [];
+    const onPos = Array.isArray(slotSolution?.onPosition)
+      ? slotSolution.onPosition
+      : [];
+    const rowCount = Math.max(slotPlayerIds?.length ?? 0, ids.length);
+    const rows = [];
+
+    for (let index = 0; index < rowCount; index += 1) {
+      const slotIndex = slotIndices?.[index] ?? null;
+      const playerId = slotPlayerIds?.[index] ?? ids[index] ?? null;
+      const player =
+        playerById && playerId != null
+          ? playerById.get(String(playerId)) ?? playerById.get(playerId) ?? null
+          : null;
+      const posName = resolvePreviewPositionName(
+        slotIndexToPositionName,
+        slotIndex,
+      );
+      const posLabel =
+        posName ??
+        player?.preferredPositionName ??
+        (slotIndex != null ? `Slot ${slotIndex}` : "Slot");
+      const ratingNum = readNumeric(player?.rating);
+      const rating = ratingNum == null ? "?" : String(ratingNum);
+      const nameRaw = player?.name ?? null;
+      const name =
+        nameRaw && String(nameRaw).trim()
+          ? String(nameRaw).trim()
+          : "Unknown";
+      const rarity = player?.rarityName ?? "";
+      const definitionId = player?.definitionId ?? null;
+      rows.push({
+        originalIndex: index,
+        slotIndex,
+        playerId,
+        posLabel,
+        rating,
+        ratingNum: ratingNum == null ? -1 : ratingNum,
+        name,
+        rarity,
+        definitionId,
+        isSpecial: Boolean(player?.isSpecial),
+        chemVal: perChem?.[index],
+        onPosVal: onPos?.[index],
+      });
+    }
+
+    if (sortKey === "rating_desc") {
+      rows.sort((left, right) => {
+        if (right.ratingNum !== left.ratingNum) {
+          return right.ratingNum - left.ratingNum;
+        }
+        const leftPos = String(left.posLabel ?? "");
+        const rightPos = String(right.posLabel ?? "");
+        const posCompare = leftPos.localeCompare(rightPos);
+        if (posCompare) return posCompare;
+        return left.originalIndex - right.originalIndex;
+      });
+    } else {
+      rows.sort((left, right) => left.originalIndex - right.originalIndex);
+    }
+
+    return rows;
+  };
+
+  const renderPreviewRowsMarkup = (rows = []) => {
+    const normalizedRows = Array.isArray(rows) ? rows : [];
+    if (!normalizedRows.length) {
+      return '<div class="ea-data-sequence-empty">No submitted players yet</div>';
+    }
+    const rowMarkup = normalizedRows
+      .map((row, index) => {
+        const idText =
+          row?.definitionId != null
+            ? `def ${row.definitionId}`
+            : row?.playerId != null
+              ? `id ${row.playerId}`
+              : "";
+        const statusPills = [];
+        if (row?.isSpecial) {
+          statusPills.push(
+            '<span class="ea-data-pill ea-data-pill--special">Special</span>',
+          );
+        }
+        if (row?.onPosVal === false) {
+          statusPills.push(
+            '<span class="ea-data-pill ea-data-pill--warn">Off-pos</span>',
+          );
+        } else if (row?.chemVal != null) {
+          statusPills.push(
+            `<span class="ea-data-pill">Chem ${escapeHtml(row.chemVal)}</span>`,
+          );
+        }
+        return `
+          <div class="ea-data-preview-row"${
+            index % 2 === 1
+              ? ' style="background-color: rgba(255, 255, 255, 0.02);"'
+              : ""
+          }>
+            <div class="ea-data-preview-pos">${escapeHtml(
+              row?.posLabel ?? "Slot",
+            )}</div>
+            <div class="ea-data-preview-main">
+              <div class="ea-data-preview-left">
+                <div class="ea-data-preview-rating">${escapeHtml(
+                  row?.rating ?? "?",
+                )}</div>
+                <div class="ea-data-preview-name">${escapeHtml(
+                  row?.name ?? "Unknown",
+                )}</div>
+                ${
+                  row?.rarity
+                    ? `<div class="ea-data-preview-rarity">${escapeHtml(
+                        row.rarity,
+                      )}</div>`
+                    : ""
+                }
+              </div>
+              <div class="ea-data-preview-right">
+                ${
+                  idText
+                    ? `<div class="ea-data-preview-id">${escapeHtml(idText)}</div>`
+                    : ""
+                }
+                ${statusPills.join("")}
+              </div>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+    return `<div class="ea-data-preview-players">${rowMarkup}</div>`;
+  };
+
   const readExtensionMetadata = () => {
     const root = document?.documentElement ?? null;
     const dataset = root?.dataset ?? {};
@@ -6484,10 +6656,11 @@
   margin-top: 12px;
 }
 .ea-data-local-exclusions__copy {
-  color: rgba(255, 255, 255, 0.66);
+  color: rgba(255, 255, 255, 0.58);
   font-size: 11px;
   font-weight: 600;
-  margin-top: 6px;
+  margin-top: 4px;
+  margin-bottom: 2px;
 }
 .ea-data-local-exclusions__section {
   margin-top: 10px;
@@ -6500,78 +6673,223 @@
   padding: 8px;
 }
 .ea-data-local-exclusions__helper {
-  color: rgba(255, 255, 255, 0.58);
+  color: rgba(255, 255, 255, 0.50);
   font-size: 11px;
   font-weight: 600;
   margin-bottom: 8px;
 }
-.ea-data-local-exclusions__summary {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+.ea-data-local-exclusions__override-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  min-height: 22px;
+}
+.ea-data-local-exclusions__override-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+  cursor: default;
+}
+.ea-data-local-exclusions__override-tag--allowed {
+  color: rgba(73, 201, 124, 0.95);
+  background: rgba(73, 201, 124, 0.12);
+  border-color: rgba(73, 201, 124, 0.30);
+}
+.ea-data-local-exclusions__override-tag--extra {
+  color: rgba(255, 130, 130, 0.95);
+  background: rgba(255, 102, 102, 0.10);
+  border-color: rgba(255, 102, 102, 0.28);
+}
+.ea-data-local-exclusions__override-tag-clear {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 1px;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+  line-height: 1;
+}
+.ea-data-local-exclusions__override-tag-clear:hover {
+  opacity: 1;
+}
+.ea-data-local-exclusions__override-none {
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 11px;
+  font-weight: 600;
+}
+.ea-data-local-exclusions__count-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 130, 130, 0.85);
+  margin-left: auto;
+}
+.ea-data-local-exclusions__selected-wrap {
   margin-bottom: 8px;
 }
-.ea-data-local-exclusions__summary-group {
-  min-width: 0;
-}
-.ea-data-local-exclusions__summary-head {
+.ea-data-local-exclusions__option-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  margin-bottom: 6px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 3px solid transparent;
+  margin-bottom: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  transition: background 0.15s, border-color 0.15s;
 }
-.ea-data-local-exclusions__subheading {
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  margin-bottom: 6px;
+.ea-data-local-exclusions__option-row:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
-.ea-data-local-exclusions__subcopy {
-  color: rgba(255, 255, 255, 0.58);
-  font-size: 11px;
+.ea-data-local-exclusions__option-row--allowed {
+  border-left-color: rgba(73, 201, 124, 0.65);
+  background: rgba(73, 201, 124, 0.05);
+}
+.ea-data-local-exclusions__option-row--allowed:hover {
+  background: rgba(73, 201, 124, 0.10);
+}
+.ea-data-local-exclusions__option-row--extra {
+  border-left-color: rgba(255, 120, 120, 0.65);
+  background: rgba(255, 102, 102, 0.04);
+}
+.ea-data-local-exclusions__option-row--extra:hover {
+  background: rgba(255, 102, 102, 0.09);
+}
+.ea-data-local-exclusions__option-row--global {
+  border-left-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.02);
+}
+.ea-data-local-exclusions__option-row--global:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.ea-data-local-exclusions__option-main {
+  flex: 1;
+  min-width: 0;
+}
+.ea-data-local-exclusions__option-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.92);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ea-data-local-exclusions__option-id {
+  font-size: 10.5px;
   font-weight: 600;
-  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.40);
+  margin-top: 1px;
 }
-.ea-data-local-exclusions__chip--allowed {
-  border-color: rgba(73, 201, 124, 0.46);
-  background: rgba(73, 201, 124, 0.13);
+.ea-data-local-exclusions__status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
-.ea-data-local-exclusions__chip--extra {
-  border-color: rgba(255, 102, 102, 0.38);
+.ea-data-local-exclusions__status-pill--global {
+  color: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.08);
+}
+.ea-data-local-exclusions__status-pill--allowed {
+  color: rgba(73, 201, 124, 0.95);
+  background: rgba(73, 201, 124, 0.14);
+}
+.ea-data-local-exclusions__status-pill--extra {
+  color: rgba(255, 130, 130, 0.95);
   background: rgba(255, 102, 102, 0.12);
 }
-.ea-data-local-exclusions__option-note {
-  margin-top: 2px;
+.ea-data-local-exclusions__list-footer {
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-align: center;
+  margin-top: 4px;
+  padding: 2px 0;
+}
+.ea-data-local-exclusions__section-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.38);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+.ea-data-local-exclusions__separator {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  margin: 8px 0;
+}
+.ea-data-local-exclusions__global-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 4px;
+}
+.ea-data-local-exclusions__global-tags-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-right: 2px;
+}
+.ea-data-local-exclusions__global-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 10px;
   font-size: 11px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.56);
+  background: rgba(255, 102, 102, 0.08);
+  color: rgba(255, 150, 150, 0.80);
+  border: 1px solid rgba(255, 102, 102, 0.20);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-.ea-data-local-exclusions__status {
-  min-width: 86px;
-  text-align: right;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.01em;
-}
-.ea-data-local-exclusions__status--default {
-  color: rgba(255, 255, 255, 0.72);
-}
-.ea-data-local-exclusions__status--global {
-  color: rgba(255, 140, 140, 0.92);
-}
-.ea-data-local-exclusions__status--allowed {
+.ea-data-local-exclusions__global-tag:hover {
+  background: rgba(73, 201, 124, 0.12);
+  border-color: rgba(73, 201, 124, 0.35);
   color: rgba(73, 201, 124, 0.95);
 }
-.ea-data-local-exclusions__status--extra {
-  color: rgba(255, 170, 170, 0.92);
+.ea-data-local-exclusions__global-tag--allowed {
+  background: rgba(73, 201, 124, 0.10);
+  border-color: rgba(73, 201, 124, 0.30);
+  color: rgba(73, 201, 124, 0.90);
+  text-decoration: line-through;
 }
-@media (max-width: 640px) {
-  .ea-data-local-exclusions__summary {
-    grid-template-columns: 1fr;
-  }
+.ea-data-local-exclusions__global-tag--allowed:hover {
+  background: rgba(255, 102, 102, 0.08);
+  border-color: rgba(255, 102, 102, 0.25);
+  color: rgba(255, 150, 150, 0.80);
+  text-decoration: none;
+}
+.ea-data-local-exclusions__option-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(73, 201, 124, 0.45);
+  flex-shrink: 0;
 }
 
 #ea-data-settings-overlay {
@@ -6589,12 +6907,15 @@
 }
 .ea-data-settings-modal {
   width: min(520px, calc(100vw - 24px));
+  max-height: min(92vh, 900px);
   background: #0b0b0b;
   border: 2px solid #0B96FF;
   border-radius: 10px;
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.65);
   padding: 14px 14px 12px;
   color: #fff;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .ea-data-settings-header {
   display: flex;
@@ -7768,6 +8089,62 @@ input.ea-data-range__input:disabled::-moz-range-progress {
   max-height: 78px;
   overflow-y: auto;
   padding-right: 4px;
+}
+.ea-data-sequence-used-list {
+  display: block;
+}
+.ea-data-sequence-used-entry {
+  margin-bottom: 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.ea-data-sequence-used-entry--stacked {
+  margin-top: 0;
+}
+.ea-data-sequence-used-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.ea-data-sequence-used-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ea-data-sequence-used-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ea-data-sequence-used-entry-title {
+  font-weight: 800;
+  color: #0B96FF;
+  font-size: 13px;
+}
+.ea-data-sequence-used-entry-copy {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  font-weight: 700;
+}
+.ea-data-sequence-used-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ea-data-sequence-used-meta {
+  padding: 8px 12px;
+  color: rgba(255, 255, 255, 0.72);
+  font-weight: 800;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
 }
 .ea-data-pill--rating {
   border-color: rgba(11, 150, 255, 0.40);
@@ -9045,10 +9422,6 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         ? {
             label: "Excluded Nations",
             searchPlaceholder: "Search nations by name or ID...",
-            allowedLabel: "Allowed here",
-            extraLabel: "Disabled here",
-            helperCopy:
-              "Click a row to enable or disable it for this solver. Global exclusions can be turned on here without changing your defaults.",
             optionsGetter: getAvailableNationsForExclusion,
             getFallbackOptions: getNationOptionsFromMetaCache,
             getLabel: getNationExclusionLabel,
@@ -9056,10 +9429,6 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         : {
             label: "Excluded Leagues",
             searchPlaceholder: "Search leagues by name or ID...",
-            allowedLabel: "Allowed here",
-            extraLabel: "Disabled here",
-            helperCopy:
-              "Click a row to enable or disable it for this solver. Global exclusions can be turned on here without changing your defaults.",
             optionsGetter: getAvailableLeaguesForExclusion,
             getFallbackOptions: getLeagueOptionsFromMetaCache,
             getLabel: getLeagueExclusionLabel,
@@ -9081,21 +9450,96 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       });
     };
 
-    const renderSummaryChips = (container, ids, { kind, mode, getLabel }) => {
+    const renderOverrideTags = (container, { kind, current, getLabel }) => {
       if (!container) return;
       try {
         container.innerHTML = "";
       } catch {}
-      if (!ids.length) {
-        const empty = document.createElement("div");
-        empty.className = "ea-data-excluded-empty";
-        empty.textContent = "None";
-        container.append(empty);
+      const allowedCount = current.allowedGlobalIds.length;
+      const extraCount = current.extraExcludedIds.length;
+      if (!allowedCount && !extraCount) {
+        const none = document.createElement("span");
+        none.className = "ea-data-local-exclusions__override-none";
+        none.textContent = "No overrides";
+        container.append(none);
         return;
       }
-      for (const id of ids) {
+      if (allowedCount) {
+        const tag = document.createElement("span");
+        tag.className =
+          "ea-data-local-exclusions__override-tag ea-data-local-exclusions__override-tag--allowed";
+        const text = document.createElement("span");
+        text.textContent = `${allowedCount} re-enabled`;
+        const clearBtn = document.createElement("button");
+        clearBtn.type = "button";
+        clearBtn.className = "ea-data-local-exclusions__override-tag-clear";
+        clearBtn.textContent = "\u00D7";
+        clearBtn.disabled = state.disabled;
+        clearBtn.setAttribute("data-local-clear", "allowed");
+        clearBtn.setAttribute("data-kind", kind);
+        tag.append(text);
+        tag.append(clearBtn);
+        container.append(tag);
+      }
+      if (extraCount) {
+        const tag = document.createElement("span");
+        tag.className =
+          "ea-data-local-exclusions__override-tag ea-data-local-exclusions__override-tag--extra";
+        const text = document.createElement("span");
+        text.textContent = `${extraCount} extra blocked`;
+        const clearBtn = document.createElement("button");
+        clearBtn.type = "button";
+        clearBtn.className = "ea-data-local-exclusions__override-tag-clear";
+        clearBtn.textContent = "\u00D7";
+        clearBtn.disabled = state.disabled;
+        clearBtn.setAttribute("data-local-clear", "extra");
+        clearBtn.setAttribute("data-kind", kind);
+        tag.append(text);
+        tag.append(clearBtn);
+        container.append(tag);
+      }
+    };
+
+    const renderGlobalExcludedTags = (container, { kind, current, getLabel }) => {
+      if (!container) return;
+      try {
+        container.innerHTML = "";
+      } catch {}
+      const globalIds = current.globalExcludedIds;
+      if (!globalIds.length) {
+        const none = document.createElement("span");
+        none.className = "ea-data-local-exclusions__override-none";
+        none.textContent = "No global exclusions.";
+        container.append(none);
+        return;
+      }
+      const allowedSet = new Set(current.allowedGlobalIds.map(String));
+      const label = document.createElement("span");
+      label.className = "ea-data-local-exclusions__global-tags-label";
+      label.textContent = "Global:";
+      container.append(label);
+      for (const id of globalIds) {
+        const isAllowed = allowedSet.has(String(id));
+        const tag = document.createElement("span");
+        tag.className = `ea-data-local-exclusions__global-tag${isAllowed ? " ea-data-local-exclusions__global-tag--allowed" : ""}`;
+        tag.textContent = getLabel(id) ?? `${kind === "nation" ? "Nation" : "League"} ${id}`;
+        tag.setAttribute("data-local-action", "toggle");
+        tag.setAttribute("data-kind", kind);
+        tag.setAttribute("data-id", String(id));
+        container.append(tag);
+      }
+    };
+
+    const renderSelectedChips = (container, ids, { kind, getLabel }) => {
+      if (!container) return;
+      try {
+        container.innerHTML = "";
+      } catch {}
+      const normalizedIds = normalizeIdList(ids, []);
+      if (!normalizedIds.length) return;
+      for (const id of normalizedIds) {
         const chip = document.createElement("div");
-        chip.className = `ea-data-excluded-league-chip ea-data-local-exclusions__chip--${mode}`;
+        chip.className = "ea-data-excluded-league-chip";
 
         const label = document.createElement("span");
         label.textContent =
@@ -9122,11 +9566,13 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         container.innerHTML = "";
       } catch {}
 
-      const allowedSet = new Set(current.allowedGlobalIds.map(String));
       const extraSet = new Set(current.extraExcludedIds.map(String));
       const globalExcludedSet = new Set(current.globalExcludedIds.map(String));
-      const effectiveSet = new Set(current.effectiveExcludedIds.map(String));
-      const filtered = (Array.isArray(options) ? options : []).filter((entry) => {
+      const allOptions = Array.isArray(options) ? options : [];
+      const nonGlobalOptions = allOptions.filter(
+        (entry) => !globalExcludedSet.has(String(entry?.id ?? "")),
+      );
+      const filtered = nonGlobalOptions.filter((entry) => {
         const id = String(entry?.id ?? "");
         const name = String(entry?.name ?? "");
         if (!search) return true;
@@ -9145,62 +9591,64 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         return;
       }
 
-      for (const entry of filtered) {
+      const MAX_VISIBLE = 80;
+      const visible = filtered.slice(0, MAX_VISIBLE);
+
+      for (const entry of visible) {
         const id = String(entry?.id ?? "");
-        const globallyExcluded = globalExcludedSet.has(id);
-        const allowedHere = allowedSet.has(id);
         const extraExcluded = extraSet.has(id);
-        const effectivelyExcluded = effectiveSet.has(id);
-        let statusText = "Enabled by default";
-        let noteText = "Click to disable for this solver.";
-        let statusClass = "default";
-        if (globallyExcluded && !allowedHere) {
-          statusText = "Disabled globally";
-          noteText = "Click to enable for this solver.";
-          statusClass = "global";
-        } else if (globallyExcluded && allowedHere) {
-          statusText = "Enabled here";
-          noteText = "Click to restore the global exclusion.";
-          statusClass = "allowed";
-        } else if (extraExcluded) {
-          statusText = "Disabled here";
-          noteText = "Click to re-enable.";
-          statusClass = "extra";
+
+        let rowVariant = "";
+        let pillText = "";
+        let pillClass = "";
+        if (extraExcluded) {
+          rowVariant = "extra";
+          pillText = "\u2717 Blocked locally";
+          pillClass = "extra";
         }
 
         const row = document.createElement("div");
-        row.className = "ea-data-excluded-leagues-option";
+        row.className = `ea-data-local-exclusions__option-row${rowVariant ? ` ea-data-local-exclusions__option-row--${rowVariant}` : ""}`;
         row.setAttribute("data-local-action", "toggle");
         row.setAttribute("data-kind", kind);
         row.setAttribute("data-id", id);
-        row.setAttribute("data-selected", effectivelyExcluded ? "true" : "false");
 
         const main = document.createElement("div");
-        main.className = "ea-data-excluded-leagues-option-main";
+        main.className = "ea-data-local-exclusions__option-main";
 
         const nameEl = document.createElement("div");
-        nameEl.className = "ea-data-excluded-leagues-option-name";
+        nameEl.className = "ea-data-local-exclusions__option-name";
         nameEl.textContent = sanitizeDisplayText(entry?.name) ?? getLabel(id) ?? id;
 
         const idEl = document.createElement("div");
-        idEl.className = "ea-data-excluded-leagues-option-id";
+        idEl.className = "ea-data-local-exclusions__option-id";
         idEl.textContent = `${kind === "nation" ? "Nation" : "League"} ID ${id}`;
-
-        const noteEl = document.createElement("div");
-        noteEl.className = "ea-data-local-exclusions__option-note";
-        noteEl.textContent = noteText;
 
         main.append(nameEl);
         main.append(idEl);
-        main.append(noteEl);
-
-        const statusEl = document.createElement("div");
-        statusEl.className = `ea-data-local-exclusions__status ea-data-local-exclusions__status--${statusClass}`;
-        statusEl.textContent = statusText;
-
         row.append(main);
-        row.append(statusEl);
+
+        if (pillText) {
+          const pill = document.createElement("span");
+          pill.className = `ea-data-local-exclusions__status-pill ea-data-local-exclusions__status-pill--${pillClass}`;
+          pill.textContent = pillText;
+          row.append(pill);
+        }
+
         container.append(row);
+
+        if (!pillText) {
+          const dot = document.createElement("span");
+          dot.className = "ea-data-local-exclusions__option-dot";
+          row.insertBefore(dot, main);
+        }
+      }
+
+      if (filtered.length > MAX_VISIBLE) {
+        const footer = document.createElement("div");
+        footer.className = "ea-data-local-exclusions__list-footer";
+        footer.textContent = `Showing ${MAX_VISIBLE} of ${filtered.length} — refine your search to see more.`;
+        container.append(footer);
       }
     };
 
@@ -9219,10 +9667,17 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const button = section.querySelector("[data-local-kind-toggle]");
       const panel = section.querySelector("[data-local-kind-panel]");
       const countEl = section.querySelector("[data-local-kind-count]");
-      const overrideCount =
-        current.allowedGlobalIds.length + current.extraExcludedIds.length;
+      const localBlockedCount = current.extraExcludedIds.length;
+      const reEnabledCount = current.allowedGlobalIds.length;
       if (countEl) {
-        countEl.textContent = `${overrideCount} changed | ${current.effectiveExcludedIds.length} effective`;
+        const parts = [];
+        if (localBlockedCount > 0) {
+          parts.push(`${localBlockedCount} blocked`);
+        }
+        if (reEnabledCount > 0) {
+          parts.push(`${reEnabledCount} re-enabled`);
+        }
+        countEl.textContent = parts.join(" \u00b7 ");
       }
       if (button) {
         button.setAttribute(
@@ -9239,30 +9694,31 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       }
 
       const searchInput = section.querySelector("[data-local-search]");
-      const allowedClear = section.querySelector('[data-local-clear="allowed"]');
-      const extraClear = section.querySelector('[data-local-clear="extra"]');
       if (searchInput) {
         searchInput.disabled = state.disabled;
         if (searchInput.value !== state.search[kind]) {
           searchInput.value = state.search[kind];
         }
       }
-      if (allowedClear) {
-        allowedClear.disabled = state.disabled || current.allowedGlobalIds.length === 0;
-      }
-      if (extraClear) {
-        extraClear.disabled = state.disabled || current.extraExcludedIds.length === 0;
-      }
 
-      renderSummaryChips(
-        section.querySelector('[data-local-summary="allowed"]'),
-        current.allowedGlobalIds,
-        { kind, mode: "allowed", getLabel: config.getLabel },
+      renderOverrideTags(
+        section.querySelector("[data-local-override-tags]"),
+        { kind, current, getLabel: config.getLabel },
       );
-      renderSummaryChips(
-        section.querySelector('[data-local-summary="extra"]'),
+      renderGlobalExcludedTags(
+        section.querySelector("[data-local-global-tags]"),
+        { kind, current, getLabel: config.getLabel },
+      );
+      const selectedExtraWrap = section.querySelector(
+        '[data-local-selected-wrap="extra"]',
+      );
+      if (selectedExtraWrap) {
+        selectedExtraWrap.hidden = current.extraExcludedIds.length === 0;
+      }
+      renderSelectedChips(
+        section.querySelector('[data-local-selected="extra"]'),
         current.extraExcludedIds,
-        { kind, mode: "extra", getLabel: config.getLabel },
+        { kind, getLabel: config.getLabel },
       );
       renderOptionList(section.querySelector('[data-local-options="all"]'), {
         kind,
@@ -9305,27 +9761,20 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             <div class="ea-data-local-exclusions__section" data-local-kind="${kind}">
               <button type="button" class="ea-data-collapsible-heading" data-local-kind-toggle="${kind}" aria-expanded="false" aria-controls="${idPrefix}-${kind}">
                 <span>${escapeHtml(config.label)}</span>
-                <span class="ea-data-excluded-count" data-local-kind-count="${kind}">0 changed | 0 effective</span>
+                <span class="ea-data-local-exclusions__count-badge" data-local-kind-count="${kind}"></span>
               </button>
               <div class="ea-data-local-exclusions__body" id="${idPrefix}-${kind}" data-local-kind-panel="${kind}" aria-hidden="true" hidden>
-                <div class="ea-data-local-exclusions__helper">${escapeHtml(config.helperCopy)}</div>
-                <input class="ea-data-excluded-leagues-search" type="search" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(config.searchPlaceholder)}" data-local-search="${kind}" data-kind="${kind}" />
-                <div class="ea-data-local-exclusions__summary">
-                  <div class="ea-data-local-exclusions__summary-group">
-                    <div class="ea-data-local-exclusions__summary-head">
-                      <span class="ea-data-local-exclusions__subheading">${escapeHtml(config.allowedLabel)}</span>
-                      <button type="button" class="ea-data-excluded-clear" data-local-clear="allowed" data-kind="${kind}">Clear</button>
-                    </div>
-                    <div class="ea-data-excluded-leagues-selected" data-local-summary="allowed"></div>
-                  </div>
-                  <div class="ea-data-local-exclusions__summary-group">
-                    <div class="ea-data-local-exclusions__summary-head">
-                      <span class="ea-data-local-exclusions__subheading">${escapeHtml(config.extraLabel)}</span>
-                      <button type="button" class="ea-data-excluded-clear" data-local-clear="extra" data-kind="${kind}">Clear</button>
-                    </div>
-                    <div class="ea-data-excluded-leagues-selected" data-local-summary="extra"></div>
-                  </div>
+                <div class="ea-data-local-exclusions__helper">Click any row to toggle it for this solver.</div>
+                <div class="ea-data-local-exclusions__override-tags" data-local-override-tags="${kind}"></div>
+                <div class="ea-data-local-exclusions__section-label">Globally Blocked</div>
+                <div class="ea-data-local-exclusions__global-tags" data-local-global-tags="${kind}"></div>
+                <div class="ea-data-local-exclusions__selected-wrap" data-local-selected-wrap="extra" hidden>
+                  <div class="ea-data-local-exclusions__section-label">Blocked Here</div>
+                  <div class="ea-data-excluded-leagues-selected" data-local-selected="extra"></div>
                 </div>
+                <hr class="ea-data-local-exclusions__separator" />
+                <div class="ea-data-local-exclusions__section-label">Available ${kind === "nation" ? "Nations" : "Leagues"}</div>
+                <input class="ea-data-excluded-leagues-search" type="search" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(config.searchPlaceholder)}" data-local-search="${kind}" data-kind="${kind}" />
                 <div class="ea-data-excluded-leagues-list" data-local-options="all"></div>
               </div>
             </div>
@@ -12140,82 +12589,13 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         multiSolveOverlayState?.slotIndexToPositionName ?? null;
       const slotSolution = sol?.slotSolution ?? null;
 
-      const slotIndices = Array.isArray(slotSolution?.fieldSlotIndices)
-        ? slotSolution.fieldSlotIndices
-        : null;
-      const slotPlayerIds = Array.isArray(slotSolution?.fieldSlotToPlayerId)
-        ? slotSolution.fieldSlotToPlayerId
-        : null;
-      const perChem = Array.isArray(slotSolution?.perPlayerChem)
-        ? slotSolution.perPlayerChem
-        : [];
-      const onPos = Array.isArray(slotSolution?.onPosition)
-        ? slotSolution.onPosition
-        : [];
-
-      const ids = Array.isArray(sol?.solutionIds) ? sol.solutionIds : [];
-      const rowCount = Math.max(slotPlayerIds?.length ?? 0, ids.length);
-
-      const rows = [];
-      for (let i = 0; i < rowCount; i += 1) {
-        const slotIndex = slotIndices?.[i] ?? null;
-        const playerId = slotPlayerIds?.[i] ?? ids[i] ?? null;
-        const player =
-          playerById && playerId != null
-            ? playerById.get(String(playerId))
-            : null;
-
-        const posName =
-          slotIndex != null && slotIndexToPos
-            ? (slotIndexToPos.get(Number(slotIndex)) ?? null)
-            : null;
-        const posLabel =
-          posName ??
-          player?.preferredPositionName ??
-          (slotIndex != null ? `Slot ${slotIndex}` : "Slot");
-
-        const ratingNum = readNumeric(player?.rating);
-        const rating = ratingNum == null ? "?" : String(ratingNum);
-        const nameRaw = player?.name ?? null;
-        const name =
-          nameRaw && String(nameRaw).trim()
-            ? String(nameRaw).trim()
-            : "Unknown";
-        const rarity = player?.rarityName ?? "";
-        const definitionId = player?.definitionId ?? null;
-        const isSpecial = Boolean(player?.isSpecial);
-        const chemVal = perChem?.[i];
-        const onPosVal = onPos?.[i];
-
-        rows.push({
-          originalIndex: i,
-          slotIndex,
-          playerId,
-          posLabel,
-          rating,
-          ratingNum: ratingNum == null ? -1 : ratingNum,
-          name,
-          rarity,
-          definitionId,
-          isSpecial,
-          chemVal,
-          onPosVal,
-        });
-      }
-
-      const sortKey = String(multiSolveOverlayState?.sortKey ?? "rating_desc");
-      if (sortKey === "rating_desc") {
-        rows.sort((a, b) => {
-          if (b.ratingNum !== a.ratingNum) return b.ratingNum - a.ratingNum;
-          const ap = String(a.posLabel ?? "");
-          const bp = String(b.posLabel ?? "");
-          const cmp = ap.localeCompare(bp);
-          if (cmp) return cmp;
-          return a.originalIndex - b.originalIndex;
-        });
-      } else if (sortKey === "slot") {
-        rows.sort((a, b) => a.originalIndex - b.originalIndex);
-      }
+      const rows = buildPreviewRows({
+        solutionIds: Array.isArray(sol?.solutionIds) ? sol.solutionIds : [],
+        slotSolution,
+        playerById,
+        slotIndexToPositionName: slotIndexToPos,
+        sortKey: String(multiSolveOverlayState?.sortKey ?? "rating_desc"),
+      });
 
       for (const data of rows) {
         const playerId = data.playerId ?? null;
@@ -13261,6 +13641,30 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           settings,
           globalSettings,
           localSettings: normalizeLocalExclusionSettings(settings),
+        });
+      } catch {}
+    } else {
+      try {
+        const globalSettings = await getSolverSettingsForChallenge(null).catch(
+          () => getDefaultSolverSettings(),
+        );
+        multiSolveOverlayState.globalSettings = globalSettings;
+        multiSolveOverlayState.effectivePoolSettings = mergeLocalExclusionsIntoSettings(
+          {
+            settings: multiSolveOverlayState?.poolSettings,
+            globalSettings,
+            localSettings: normalizeLocalExclusionSettings(
+              multiSolveOverlayState?.localExclusions,
+            ),
+            force: true,
+          },
+        );
+        multiSolveOverlayState?.localExclusionsEditor?.sync?.({
+          settings: multiSolveOverlayState?.poolSettings,
+          globalSettings,
+          localSettings: normalizeLocalExclusionSettings(
+            multiSolveOverlayState?.localExclusions,
+          ),
         });
       } catch {}
     }
@@ -14535,101 +14939,13 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           const playersWrap = document.createElement("div");
           playersWrap.className = "ea-data-preview-players";
 
-          const ids = Array.isArray(entry?.solutionIds)
-            ? entry.solutionIds
-            : [];
-          const slotSolution = entry?.slotSolution ?? null;
-          const slotIndices = Array.isArray(slotSolution?.fieldSlotIndices)
-            ? slotSolution.fieldSlotIndices
-            : null;
-          const slotPlayerIds = Array.isArray(slotSolution?.fieldSlotToPlayerId)
-            ? slotSolution.fieldSlotToPlayerId
-            : null;
-          const perChem = Array.isArray(slotSolution?.perPlayerChem)
-            ? slotSolution.perPlayerChem
-            : [];
-          const onPos = Array.isArray(slotSolution?.onPosition)
-            ? slotSolution.onPosition
-            : [];
-          const slotIndexToPos = entry?.slotIndexToPositionName ?? null;
-
-          const getPosName = (slotIndex) => {
-            if (slotIndex == null || !slotIndexToPos) return null;
-            if (slotIndexToPos instanceof Map) {
-              return slotIndexToPos.get(Number(slotIndex)) ?? null;
-            }
-            if (Array.isArray(slotIndexToPos)) {
-              for (const pair of slotIndexToPos) {
-                if (!Array.isArray(pair) || pair.length < 2) continue;
-                if (Number(pair[0]) === Number(slotIndex))
-                  return pair[1] ?? null;
-              }
-              return null;
-            }
-            if (typeof slotIndexToPos === "object") {
-              return (
-                slotIndexToPos[slotIndex] ??
-                slotIndexToPos[String(slotIndex)] ??
-                null
-              );
-            }
-            return null;
-          };
-
-          const rowCount = Math.max(slotPlayerIds?.length ?? 0, ids.length);
-          const rows = [];
-          for (let i = 0; i < rowCount; i += 1) {
-            const slotIndex = slotIndices?.[i] ?? null;
-            const playerId = slotPlayerIds?.[i] ?? ids[i] ?? null;
-            const player =
-              playerById && playerId != null
-                ? playerById.get(String(playerId))
-                : null;
-            const posName = getPosName(slotIndex);
-            const posLabel =
-              posName ??
-              player?.preferredPositionName ??
-              (slotIndex != null ? `Slot ${slotIndex}` : "Slot");
-            const ratingNum = readNumeric(player?.rating);
-            const rating = ratingNum == null ? "?" : String(ratingNum);
-            const nameRaw = player?.name ?? null;
-            const name =
-              nameRaw && String(nameRaw).trim()
-                ? String(nameRaw).trim()
-                : "Unknown";
-            const rarity = player?.rarityName ?? "";
-            const definitionId = player?.definitionId ?? null;
-            const isSpecial = Boolean(player?.isSpecial);
-            const chemVal = perChem?.[i];
-            const onPosVal = onPos?.[i];
-            rows.push({
-              originalIndex: i,
-              slotIndex,
-              playerId,
-              posLabel,
-              rating,
-              ratingNum: ratingNum == null ? -1 : ratingNum,
-              name,
-              rarity,
-              definitionId,
-              isSpecial,
-              chemVal,
-              onPosVal,
-            });
-          }
-
-          if (sortKey === "rating_desc") {
-            rows.sort((a, b) => {
-              if (b.ratingNum !== a.ratingNum) return b.ratingNum - a.ratingNum;
-              const ap = String(a.posLabel ?? "");
-              const bp = String(b.posLabel ?? "");
-              const cmp = ap.localeCompare(bp);
-              if (cmp) return cmp;
-              return a.originalIndex - b.originalIndex;
-            });
-          } else {
-            rows.sort((a, b) => a.originalIndex - b.originalIndex);
-          }
+          const rows = buildPreviewRows({
+            solutionIds: Array.isArray(entry?.solutionIds) ? entry.solutionIds : [],
+            slotSolution: entry?.slotSolution ?? null,
+            playerById,
+            slotIndexToPositionName: entry?.slotIndexToPositionName ?? null,
+            sortKey,
+          });
 
           for (const rowData of rows) {
             const row = document.createElement("div");
@@ -17826,6 +18142,30 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         });
         syncingLocalExclusions = false;
       } catch {}
+    } else {
+      try {
+        const globalSettings = await getSolverSettingsForChallenge(null).catch(
+          () => getDefaultSolverSettings(),
+        );
+        setSolveOverlayState.globalSettings = globalSettings;
+        setSolveOverlayState.effectivePoolSettings = mergeLocalExclusionsIntoSettings(
+          {
+            settings: setSolveOverlayState?.poolSettings,
+            globalSettings,
+            localSettings: normalizeLocalExclusionSettings(
+              setSolveOverlayState?.localExclusions,
+            ),
+            force: true,
+          },
+        );
+        setSolveOverlayState?.localExclusionsEditor?.sync?.({
+          settings: setSolveOverlayState?.poolSettings,
+          globalSettings,
+          localSettings: normalizeLocalExclusionSettings(
+            setSolveOverlayState?.localExclusions,
+          ),
+        });
+      } catch {}
     }
     try {
       setSolveOverlayState?.syncSetCycleRepeatability?.(setId, {
@@ -18146,7 +18486,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const setRuntimeStatus = (text) => {
       if (!sequenceSolveOverlayState) return;
       sequenceSolveOverlayState.runtimeStatusText = text ? String(text) : "";
-      sequenceSolveOverlayState.render();
+      sequenceSolveOverlayState.renderExecutionPanel?.();
+      sequenceSolveOverlayState.syncActions?.();
     };
 
     const touchPlans = () => {
@@ -18694,6 +19035,71 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         runState?.usedSummary && typeof runState.usedSummary === "object"
           ? runState.usedSummary
           : createEmptyRunUsedSummary();
+      const usedEntries = Array.isArray(usedSummary?.entries)
+        ? usedSummary.entries
+        : [];
+      const maxUsedIndex = Math.max(0, usedEntries.length - 1);
+      const activeUsedIndex = clampInt(
+        state?.usedSummaryIndex ?? 0,
+        0,
+        maxUsedIndex,
+      );
+      if (state) {
+        state.usedSummaryIndex = activeUsedIndex == null ? 0 : activeUsedIndex;
+      }
+      const activeUsedEntry = usedEntries[activeUsedIndex] ?? null;
+      const usedEntriesMarkup = activeUsedEntry
+        ? (() => {
+            const challengeLabel =
+              sanitizeDisplayText(activeUsedEntry?.challengeName) ?? "Challenge";
+            const sequenceStepLabel =
+              sanitizeDisplayText(activeUsedEntry?.stepLabel) ?? "Sequence Step";
+            const playersLabel = readNumeric(activeUsedEntry?.playerCount) ?? 0;
+            const specialLabel = readNumeric(activeUsedEntry?.specialCount) ?? 0;
+            const pageLabel = `${activeUsedIndex + 1} / ${usedEntries.length}`;
+            const statusLine = `Players ${playersLabel} | Special ${specialLabel}`;
+            return `
+              <div class="ea-data-sequence-used-entry">
+                <div class="ea-data-sequence-used-header">
+                  <div class="ea-data-sequence-used-header-left">
+                    <div class="ea-data-used-summary-title">Submitted Players</div>
+                    <div class="ea-data-sequence-used-entry-title">${escapeHtml(
+                      challengeLabel,
+                    )}</div>
+                    <div class="ea-data-sequence-used-entry-copy">${escapeHtml(
+                      sequenceStepLabel,
+                    )}</div>
+                  </div>
+                  <div class="ea-data-sequence-used-header-right">
+                    <div class="ea-data-sequence-used-nav">
+                      <button type="button" class="ea-data-preview-nav-btn" data-sequence-used-action="prev" ${
+                        activeUsedIndex <= 0 ? "disabled" : ""
+                      }>Prev</button>
+                      <div class="ea-data-preview-page">${escapeHtml(
+                        pageLabel,
+                      )}</div>
+                      <button type="button" class="ea-data-preview-nav-btn" data-sequence-used-action="next" ${
+                        activeUsedIndex >= maxUsedIndex ? "disabled" : ""
+                      }>Next</button>
+                    </div>
+                    <div class="ea-data-preview-right">
+                      <span class="ea-data-pill">Players ${escapeHtml(
+                        playersLabel,
+                      )}</span>
+                      <span class="ea-data-pill${
+                        specialLabel > 0 ? " ea-data-pill--special" : ""
+                      }">Special ${escapeHtml(specialLabel)}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="ea-data-sequence-used-meta">${escapeHtml(
+                  statusLine,
+                )}</div>
+                ${renderPreviewRowsMarkup(activeUsedEntry?.rows ?? [])}
+              </div>
+            `;
+          })()
+        : '<div class="ea-data-used-summary"><div class="ea-data-used-summary-top"><div class="ea-data-used-summary-title">Submitted Players</div></div><div class="ea-data-sequence-empty">No submitted players yet</div></div>';
       const usedRatingEntries = Object.entries(
         usedSummary?.ratings && typeof usedSummary.ratings === "object"
           ? usedSummary.ratings
@@ -18803,9 +19209,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 )}</div>
               </div>
             </div>
+            <div class="ea-data-sequence-used-list">${usedEntriesMarkup}</div>
             <div class="ea-data-used-summary">
               <div class="ea-data-used-summary-top">
-                <div class="ea-data-used-summary-title">Submitted Players</div>
+                <div class="ea-data-used-summary-title">Submitted Ratings</div>
                 <div class="ea-data-preview-right">
                   <span class="ea-data-pill">Players ${escapeHtml(
                     usedSummary?.playerCount ?? 0,
@@ -19202,7 +19609,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           globalSettings,
           localSettings: normalizeLocalExclusionSettings(step?.settingsSnapshot),
         });
-        editor?.expandAll?.();
+
         editor?.setDisabled?.(isRunning);
       }
     };
@@ -19252,11 +19659,16 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       }
     };
 
+    const renderExecutionPanel = () => {
+      if (!executionPanelEl) return;
+      executionPanelEl.innerHTML = renderRuntimeSurface();
+    };
+
     const render = () => {
       renderPlanList();
       renderEditor();
       renderSettingsPanel();
-      executionPanelEl.innerHTML = renderRuntimeSurface();
+      renderExecutionPanel();
       syncActions();
     };
 
@@ -19458,6 +19870,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       playerCount: 0,
       specialCount: 0,
       ratings: {},
+      entries: [],
     });
 
     const getRunProcessedChallengeCount = (runState) =>
@@ -19465,7 +19878,17 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       (readNumeric(runState?.counters?.skipped) ?? 0) +
       (readNumeric(runState?.counters?.failed) ?? 0);
 
-    const recordRunUsedPlayers = (solutionIds, runContext) => {
+    const recordRunUsedPlayers = (
+      solutionIds,
+      runContext,
+      {
+        descriptor = null,
+        step = null,
+        stepLabel = null,
+        slotSolution = null,
+        slotIndexToPositionName = null,
+      } = {},
+    ) => {
       const runState = sequenceSolveOverlayState?.runState ?? null;
       if (!runState || !Array.isArray(solutionIds) || !solutionIds.length) {
         return;
@@ -19477,6 +19900,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       if (!summary.ratings || typeof summary.ratings !== "object") {
         summary.ratings = {};
       }
+      if (!Array.isArray(summary.entries)) {
+        summary.entries = [];
+      }
+      let entrySpecialCount = 0;
       for (const id of solutionIds) {
         if (id == null) continue;
         summary.playerCount += 1;
@@ -19491,7 +19918,34 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         }
         if (player?.isSpecial) {
           summary.specialCount += 1;
+          entrySpecialCount += 1;
         }
+      }
+      summary.entries.push({
+        challengeId: descriptor?.challengeId ?? null,
+        challengeIndex: readNumeric(descriptor?.challengeIndex),
+        challengeName:
+          sanitizeDisplayText(descriptor?.challengeName) ?? "Challenge",
+        stepId: step?.id ?? null,
+        stepLabel:
+          sanitizeDisplayText(stepLabel) ??
+          sanitizeDisplayText(runState?.currentStepLabel) ??
+          "Sequence Step",
+        playerCount: solutionIds.length,
+        specialCount: entrySpecialCount,
+        rows: buildPreviewRows({
+          solutionIds,
+          slotSolution,
+          playerById: runContext?.playerById ?? null,
+          slotIndexToPositionName,
+          sortKey: "slot",
+        }),
+      });
+      if (sequenceSolveOverlayState) {
+        sequenceSolveOverlayState.usedSummaryIndex = Math.max(
+          0,
+          summary.entries.length - 1,
+        );
       }
     };
 
@@ -19587,7 +20041,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           1,
         );
       }
-      sequenceSolveOverlayState.render();
+      sequenceSolveOverlayState.renderExecutionPanel?.();
     };
 
     const updateRunStep = (stepId, patch = {}) => {
@@ -19601,7 +20055,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       if (!entry.txCounters || typeof entry.txCounters !== "object") {
         entry.txCounters = { solved: 0, skipped: 0, failed: 0 };
       }
-      sequenceSolveOverlayState.render();
+      sequenceSolveOverlayState.renderExecutionPanel?.();
       return entry;
     };
 
@@ -19615,7 +20069,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       if (entry?.txCounters && key in entry.txCounters) {
         entry.txCounters[key] += 1;
       }
-      sequenceSolveOverlayState.render();
+      sequenceSolveOverlayState.renderExecutionPanel?.();
     };
 
     const resolveStepDescriptors = async (step) => {
@@ -19912,7 +20366,17 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         );
       }
 
-      recordRunUsedPlayers(solutionIds, runContext);
+      recordRunUsedPlayers(solutionIds, runContext, {
+        descriptor,
+        step,
+        stepLabel:
+          sanitizeDisplayText(runContext?.currentStepLabel) ??
+          sanitizeDisplayText(sequenceSolveOverlayState?.runState?.currentStepLabel) ??
+          sanitizeDisplayText(descriptor?.challengeName) ??
+          null,
+        slotSolution: solveResult?.solutionSlots?.[0] ?? null,
+        slotIndexToPositionName: slotInfo?.slotIndexToPositionName ?? null,
+      });
       for (const id of solutionIds) {
         if (id == null) continue;
         runContext.usedPlayerIds.add(String(id));
@@ -19975,6 +20439,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         1,
       );
 
+      sequenceSolveOverlayState.usedSummaryIndex = 0;
       sequenceSolveOverlayState.runState = buildInitialRunState(activePlan);
       sequenceSolveOverlayState.runtimeStatusText = "Preparing solver...";
       sequenceSolveOverlayState.running = true;
@@ -20040,6 +20505,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           playerById,
           prioritize: payload?.prioritize ?? null,
           baseFilters,
+          currentStepLabel: null,
           baseExcludedPlayerIds: new Set(
             (baseFilters?.excludedPlayerIds ?? [])
               .map((value) => (value == null ? null : String(value)))
@@ -20108,6 +20574,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 stepLoopPass,
                 stepLoopCount,
               });
+              runContext.currentStepLabel = stepLabel;
               updateRunStep(step.id, {
                 label: stepLabel,
                 status: "resolving",
@@ -20624,6 +21091,35 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       }
     });
 
+    executionPanelEl?.addEventListener("click", (event) => {
+      const navBtn =
+        event?.target?.closest?.("[data-sequence-used-action]") ?? null;
+      if (!navBtn) return;
+      const usedEntries = Array.isArray(
+        sequenceSolveOverlayState?.runState?.usedSummary?.entries,
+      )
+        ? sequenceSolveOverlayState.runState.usedSummary.entries
+        : [];
+      if (!usedEntries.length) return;
+      const action = navBtn.getAttribute("data-sequence-used-action");
+      const maxIndex = Math.max(0, usedEntries.length - 1);
+      const activeIndex =
+        clampInt(sequenceSolveOverlayState?.usedSummaryIndex ?? 0, 0, maxIndex) ??
+        0;
+      if (action === "prev") {
+        sequenceSolveOverlayState.usedSummaryIndex = Math.max(0, activeIndex - 1);
+        sequenceSolveOverlayState.renderExecutionPanel?.();
+        return;
+      }
+      if (action === "next") {
+        sequenceSolveOverlayState.usedSummaryIndex = Math.min(
+          maxIndex,
+          activeIndex + 1,
+        );
+        sequenceSolveOverlayState.renderExecutionPanel?.();
+      }
+    });
+
     sequenceSolveOverlayState = {
       overlay,
       closeBtn,
@@ -20658,6 +21154,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       abortRequested: false,
       runtimeStatusText: "",
       runState: null,
+      usedSummaryIndex: 0,
       loadingPromise: null,
       activeTab: "steps",
       tabTransitionTimers: [],
@@ -20665,6 +21162,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       stepMotion: null,
       setRuntimeStatus,
       render,
+      renderExecutionPanel,
+      syncActions,
       switchTab,
       loadPlans,
       savePlans,
@@ -22068,8 +22567,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       }),
       useUnassigned: true,
       onlyStorage: false,
-      excludeTradable: true,
-      excludeSpecial: false,
+      excludeTradable: false,
+      excludeSpecial: true,
       useTotwPlayers: true,
       useEvolutionPlayers: false,
       excludedPlayerIds: Object.freeze([]),

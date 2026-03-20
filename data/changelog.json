@@ -2,6 +2,19 @@
   "version": 1,
   "releases": [
     {
+      "version": "1.6",
+      "date": "2026-03-20",
+      "headline": "Better sequence runs and easier solver control",
+      "summary": "Made Sequence Solver easier to follow and added more control over who the solver can use.",
+      "details": [
+        "Sequence Solver now shows the exact players used for each completed challenge.",
+        "Sequence Solver now lets you flip through completed challenge entries inside the execution panel.",
+        "Added local league and nation exclusions so you can block or allow them for a specific solve without changing your global settings.",
+        "TOTW cards can now be controlled separately from the main special-card filter.",
+        "Fixed exclusion panels so they show the right blocked items, stay in sync, and scroll properly."
+      ]
+    },
+    {
       "version": "1.5",
       "date": "2026-03-10",
       "headline": "Sequence Solver is live",
