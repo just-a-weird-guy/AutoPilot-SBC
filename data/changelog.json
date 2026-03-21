@@ -2,6 +2,18 @@
   "version": 1,
   "releases": [
     {
+      "version": "1.7",
+      "date": "2026-03-22",
+      "headline": "Sequence Solver fixes",
+      "summary": "Improved Sequence Solver feedback, progress, and hub reliability.",
+      "details": [
+        "Made failure messages clearer.",
+        "Progress now updates during active solve phases.",
+        "Improved handling for refreshed or relisted SBC challenges.",
+        "Fixed the missing Sequence Solver button bug in the SBC tab."
+      ]
+    },
+    {
       "version": "1.6",
       "date": "2026-03-20",
       "headline": "Better sequence runs and easier solver control",
