@@ -11434,6 +11434,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         repeatability?.challengesCount ??
         loadedChallengesTotal,
     );
+    const challengeNames = loadedChallenges
+      .map((challenge) =>
+        sanitizeDisplayText(challenge?.name ?? challenge?.title ?? null),
+      )
+      .filter(Boolean);
     const setShape = getSequenceSetShapeFromCount(challengesCount);
     const isCompletable = Boolean(setShape) && !noRepeatsLeft;
     return {
@@ -11442,6 +11447,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         sanitizeDisplayText(rawSet?.name ?? resolvedSet?.name) ??
         `Set ${setId}`,
       challengesCount,
+      challengeNames,
       setShape,
       setComplete,
       noRepeatsLeft,
@@ -18554,6 +18560,141 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       );
     };
 
+    const syncSequenceTargetMetadataFromSetEntry = async (
+      target,
+      setEntry,
+      { allowPrefetch = false } = {},
+    ) => {
+      if (!target || typeof target !== "object" || !setEntry) return false;
+      let changed = false;
+      const nextName = sanitizeDisplayText(setEntry?.name) ?? null;
+      if (target.setName !== nextName) {
+        target.setName = nextName;
+        changed = true;
+      }
+      const nextShape = getSequenceSetShape(
+        setEntry?.setShape ?? getSequenceSetShapeFromCount(setEntry?.challengesCount),
+      );
+      if (target.setShape !== nextShape) {
+        target.setShape = nextShape;
+        changed = true;
+      }
+      const nextChallengesCount = readNumeric(setEntry?.challengesCount);
+      if (target.challengesCount !== nextChallengesCount) {
+        target.challengesCount = nextChallengesCount;
+        changed = true;
+      }
+
+      let nextChallengeNames = normalizeSequenceChallengeNames(
+        setEntry?.challengeNames,
+      );
+      let nextRequirementsFingerprint = normalizeSequenceRequirementsFingerprint(
+        setEntry?.requirementsFingerprint,
+      );
+
+      const needsChallengeData =
+        allowPrefetch &&
+        readNumeric(setEntry?.id) != null &&
+        (!nextChallengeNames.length || !nextRequirementsFingerprint);
+      if (needsChallengeData) {
+        try {
+          const prefetched = await prefetchSetChallengeInfo(readNumeric(setEntry.id), {
+            reason: "sequence-target-sync",
+            force: false,
+          });
+          const prefetchedChallenges = Array.isArray(prefetched?.challenges)
+            ? prefetched.challenges
+            : [];
+          if (!nextChallengeNames.length) {
+            nextChallengeNames = normalizeSequenceChallengeNames(prefetchedChallenges);
+          }
+          if (!nextRequirementsFingerprint) {
+            nextRequirementsFingerprint = buildSequenceRequirementsFingerprint(
+              prefetchedChallenges,
+              prefetched?.requirementsByChallengeId,
+            );
+          }
+        } catch {}
+      }
+
+      if (!areSequenceStringListsEqual(target.challengeNames, nextChallengeNames)) {
+        target.challengeNames = nextChallengeNames;
+        changed = true;
+      }
+      if (target.requirementsFingerprint !== nextRequirementsFingerprint) {
+        target.requirementsFingerprint = nextRequirementsFingerprint;
+        changed = true;
+      }
+      return changed;
+    };
+
+    const scoreSequenceRematchCandidate = (target, candidate) => {
+      if (!target || !candidate) return null;
+      const requiredShape = getSequenceRequiredSetShapeForKind(target?.kind);
+      const candidateShape = getSequenceSetShape(
+        candidate?.setShape ?? getSequenceSetShapeFromCount(candidate?.challengesCount),
+      );
+      if (requiredShape == null || candidateShape !== requiredShape) return null;
+
+      const targetName = normalizeSequenceMatchText(target?.setName);
+      const candidateName = normalizeSequenceMatchText(candidate?.name);
+      if (!targetName || !candidateName || targetName !== candidateName) return null;
+
+      let score = 100;
+      const targetCount = readNumeric(target?.challengesCount);
+      const candidateCount = readNumeric(candidate?.challengesCount);
+      if (targetCount != null && candidateCount != null) {
+        if (targetCount !== candidateCount) return null;
+        score += 20;
+      }
+
+      const targetChallengeNames = normalizeSequenceChallengeNames(target?.challengeNames).map(
+        normalizeSequenceMatchText,
+      );
+      const candidateChallengeNames = normalizeSequenceChallengeNames(
+        candidate?.challengeNames,
+      ).map(normalizeSequenceMatchText);
+      const hasTargetChallengeNames = targetChallengeNames.filter(Boolean).length > 0;
+      const hasCandidateChallengeNames = candidateChallengeNames.filter(Boolean).length > 0;
+      if (hasTargetChallengeNames || hasCandidateChallengeNames) {
+        if (!hasTargetChallengeNames || !hasCandidateChallengeNames) return null;
+        if (!areSequenceStringListsEqual(targetChallengeNames, candidateChallengeNames)) {
+          return null;
+        }
+        score += 40;
+      }
+
+      const targetFingerprint = normalizeSequenceRequirementsFingerprint(
+        target?.requirementsFingerprint,
+      );
+      const candidateFingerprint = normalizeSequenceRequirementsFingerprint(
+        candidate?.requirementsFingerprint,
+      );
+      if (targetFingerprint || candidateFingerprint) {
+        if (!targetFingerprint || !candidateFingerprint) return null;
+        if (targetFingerprint !== candidateFingerprint) return null;
+        score += 80;
+      }
+
+      return {
+        score,
+        candidate,
+      };
+    };
+
+    const findSequenceRematchCandidate = (target, compatibleSets) => {
+      const candidates = Array.isArray(compatibleSets) ? compatibleSets : [];
+      const scored = candidates
+        .map((entry) => scoreSequenceRematchCandidate(target, entry))
+        .filter(Boolean)
+        .sort((left, right) => right.score - left.score);
+      if (!scored.length) return null;
+      if (scored.length > 1 && scored[0].score === scored[1].score) {
+        return null;
+      }
+      return scored[0].candidate ?? null;
+    };
+
     const getCompatibleSetsForKind = (kind, { includeSetId = null } = {}) => {
       const requiredShape = getSequenceRequiredSetShapeForKind(kind);
       const compatibleSets = getSequenceDiscoverySets().filter(
@@ -18808,10 +18949,20 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             changed = true;
           }
         }
+        if (!setEntry && step?.target?.setId != null) {
+          const rematched = findSequenceRematchCandidate(step.target, compatibleSets);
+          if (rematched) {
+            step.target.setId = readNumeric(rematched?.id);
+            setEntry = rematched;
+            changed = true;
+          }
+        }
         if (setEntry) {
-          const nextName = sanitizeDisplayText(setEntry?.name) ?? null;
-          if (step.target.setName !== nextName) {
-            step.target.setName = nextName;
+          if (
+            await syncSequenceTargetMetadataFromSetEntry(step.target, setEntry, {
+              allowPrefetch: forceChallenges,
+            })
+          ) {
             changed = true;
           }
           const actualShape = getSequenceSetShape(
@@ -23699,6 +23850,88 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     return null;
   };
 
+  const normalizeSequenceMatchText = (value) => {
+    const text = sanitizeDisplayText(value);
+    return text ? text.trim().toLowerCase() : null;
+  };
+
+  const normalizeSequenceChallengeNames = (value) => {
+    const raw = Array.isArray(value) ? value : [];
+    return raw
+      .map((entry) => {
+        if (entry && typeof entry === "object") {
+          return sanitizeDisplayText(
+            entry?.challengeName ?? entry?.name ?? entry?.title ?? null,
+          );
+        }
+        return sanitizeDisplayText(entry);
+      })
+      .filter(Boolean);
+  };
+
+  const areSequenceStringListsEqual = (left, right) => {
+    const a = Array.isArray(left) ? left : [];
+    const b = Array.isArray(right) ? right : [];
+    if (a.length !== b.length) return false;
+    for (let index = 0; index < a.length; index += 1) {
+      if (a[index] !== b[index]) return false;
+    }
+    return true;
+  };
+
+  const normalizeSequenceRequirementsFingerprint = (value) =>
+    sanitizeDisplayText(value) ?? null;
+
+  const buildSequenceRequirementRuleFingerprint = (rules) => {
+    const normalized = Array.isArray(rules) ? rules : [];
+    const parts = normalized
+      .map((rule) =>
+        [
+          sanitizeDisplayText(rule?.type) ?? "",
+          sanitizeDisplayText(rule?.key) ?? "",
+          sanitizeDisplayText(rule?.keyName) ?? "",
+          sanitizeDisplayText(rule?.op) ?? "",
+          readNumeric(rule?.count) ?? "",
+          readNumeric(rule?.derivedCount) ?? "",
+          sanitizeDisplayText(rule?.value) ?? "",
+          sanitizeDisplayText(rule?.scope) ?? "",
+          sanitizeDisplayText(rule?.label) ?? "",
+        ].join("~"),
+      )
+      .filter(Boolean)
+      .sort();
+    return parts.length ? parts.join("^") : null;
+  };
+
+  const buildSequenceRequirementsFingerprint = (
+    challengeItems,
+    requirementsByChallengeId,
+  ) => {
+    if (!(requirementsByChallengeId instanceof Map)) return null;
+    const items = Array.isArray(challengeItems) ? challengeItems : [];
+    if (!items.length) return null;
+    const segments = [];
+    for (const item of items) {
+      const challengeId = item?.challengeId ?? item?.id ?? null;
+      if (challengeId == null) return null;
+      const requirementEntry =
+        requirementsByChallengeId.get(String(challengeId)) ?? null;
+      const rulesFingerprint = buildSequenceRequirementRuleFingerprint(
+        requirementEntry?.snapshot?.requirementsNormalized ??
+          requirementEntry?.requirementsNormalized ??
+          requirementEntry?.requirements ??
+          null,
+      );
+      if (!rulesFingerprint) return null;
+      const challengeName =
+        normalizeSequenceMatchText(
+          item?.challengeName ?? item?.name ?? item?.title ?? null,
+        ) ?? `challenge-${segments.length + 1}`;
+      segments.push(`${challengeName}::${rulesFingerprint}`);
+    }
+    return segments.length ? segments.join("||") : null;
+  };
+
   const getSequenceRequiredSetShapeForKind = (kind) =>
     String(kind ?? "")
       .trim()
@@ -23717,6 +23950,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     kind: SEQUENCE_TARGET_KIND_SINGLE,
     setId: null,
     setName: null,
+    setShape: null,
+    challengesCount: null,
+    challengeNames: [],
+    requirementsFingerprint: null,
   });
 
   const normalizeSequenceTarget = (value) => {
@@ -23737,6 +23974,17 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     normalized.setName = sanitizeDisplayText(
       raw?.setName ?? raw?.groupName ?? null,
     );
+    normalized.setShape = getSequenceSetShape(
+      raw?.setShape ?? getSequenceSetShapeFromCount(raw?.challengesCount),
+    );
+    normalized.challengesCount = readNumeric(
+      raw?.challengesCount ?? raw?.challengeCount ?? null,
+    );
+    normalized.challengeNames = normalizeSequenceChallengeNames(
+      raw?.challengeNames,
+    );
+    normalized.requirementsFingerprint =
+      normalizeSequenceRequirementsFingerprint(raw?.requirementsFingerprint);
     return normalized;
   };
 
