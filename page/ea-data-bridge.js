@@ -4428,6 +4428,8 @@
   let sequenceEntryObserver = null;
   let sequenceEntryObserverRoot = null;
   let sequenceEntryReflowTimer = null;
+  let sequenceEntryDocumentObserver = null;
+  let sequenceEntryDocumentObserverStarted = false;
   let currentSbcSet = null;
   let exclusionControlSeq = 0;
   let activeItemDetailsPanel = null;
@@ -22123,6 +22125,71 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     sequenceEntryObserverRoot = null;
   };
 
+  const scheduleSequenceHubEntryReflow = (view = null, delayMs = 80) => {
+    try {
+      if (sequenceEntryReflowTimer != null) {
+        clearTimeout(sequenceEntryReflowTimer);
+      }
+    } catch {}
+    sequenceEntryReflowTimer = setTimeout(() => {
+      sequenceEntryReflowTimer = null;
+      ensureSequenceHubEntry(view ?? currentSbcHubView ?? null);
+    }, Math.max(0, readNumeric(delayMs) ?? 0));
+  };
+
+  const nodeTouchesSbcHub = (node) => {
+    if (!(node instanceof Element)) return false;
+    try {
+      if (
+        node.matches?.(
+          ".ut-sbc-hub-view, div.ut-sbc-hub-view > div.container, div.layout-hub.grid",
+        )
+      ) {
+        return true;
+      }
+      return Boolean(
+        node.querySelector?.(
+          ".ut-sbc-hub-view, div.ut-sbc-hub-view > div.container, div.layout-hub.grid",
+        ),
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  const ensureSequenceEntryDocumentObserver = () => {
+    if (sequenceEntryDocumentObserverStarted) return;
+    if (typeof MutationObserver !== "function") return;
+    if (!(document.body instanceof HTMLElement)) return;
+    sequenceEntryDocumentObserverStarted = true;
+    sequenceEntryDocumentObserver = new MutationObserver((mutations) => {
+      let touchesHub = false;
+      for (const mutation of mutations ?? []) {
+        if (mutation?.type !== "childList") continue;
+        for (const added of Array.from(mutation.addedNodes ?? [])) {
+          if (nodeTouchesSbcHub(added)) {
+            touchesHub = true;
+            break;
+          }
+        }
+        if (touchesHub) break;
+        for (const removed of Array.from(mutation.removedNodes ?? [])) {
+          if (nodeTouchesSbcHub(removed)) {
+            touchesHub = true;
+            break;
+          }
+        }
+        if (touchesHub) break;
+      }
+      if (!touchesHub) return;
+      scheduleSequenceHubEntryReflow(null, 0);
+    });
+    sequenceEntryDocumentObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  };
+
   const openSequenceHubEntry = async () => {
     try {
       if (typeof openSequenceSolveOverlay === "function") {
@@ -22160,6 +22227,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
   };
 
   const ensureSequenceEntryObserver = (view = null) => {
+    ensureSequenceEntryDocumentObserver();
     const container = resolveSbcHubContainer(view);
     const hubRoot = container?.closest?.(".ut-sbc-hub-view") ?? null;
     if (!(hubRoot instanceof HTMLElement)) return false;
@@ -22169,15 +22237,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     try {
       sequenceEntryObserverRoot = hubRoot;
       sequenceEntryObserver = new MutationObserver(() => {
-        try {
-          if (sequenceEntryReflowTimer != null) {
-            clearTimeout(sequenceEntryReflowTimer);
-          }
-        } catch {}
-        sequenceEntryReflowTimer = setTimeout(() => {
-          sequenceEntryReflowTimer = null;
-          ensureSequenceHubEntry(currentSbcHubView ?? null);
-        }, 80);
+        scheduleSequenceHubEntryReflow(currentSbcHubView ?? null, 80);
       });
       sequenceEntryObserver.observe(hubRoot, {
         childList: true,
@@ -27679,6 +27739,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     startSbcHookPolling();
     startAppSettingsHookPolling();
     startHomeHookPolling();
+    ensureSequenceEntryDocumentObserver();
     if (sbcHubHooked) ensureSequenceHubEntry(currentSbcHubView ?? null);
   };
 
@@ -28029,6 +28090,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
   startSbcHookPolling();
   startAppSettingsHookPolling();
   startHomeHookPolling();
+  ensureSequenceEntryDocumentObserver();
   try {
     startTopbarSupportHookPolling();
   } catch (error) {
