@@ -16,6 +16,8 @@ data/*
 !scripts/
 scripts/*
 !scripts/changelog-entry.js
+!scripts/replay-sequence-failure-runtime.mjs
+!scripts/replay-sequence-stale-rematch.mjs
 !scripts/replay-totw-matrix.mjs
 
 # Local planning / scratch notes

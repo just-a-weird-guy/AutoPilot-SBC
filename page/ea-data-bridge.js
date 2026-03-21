@@ -5604,6 +5604,11 @@
   background: rgba(30, 120, 70, 0.1);
   color: rgba(100, 230, 160, 0.9);
 }
+.ea-data-sequence-run-badge[data-status="partial"] {
+  border-color: rgba(255, 185, 90, 0.28);
+  background: rgba(150, 92, 22, 0.12);
+  color: rgba(255, 220, 130, 0.92);
+}
 .ea-data-sequence-step-badge[data-status="skipped"],
 .ea-data-sequence-run-badge[data-status="stopped"] {
   border-color: rgba(255, 200, 80, 0.25);
@@ -5946,6 +5951,53 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+.ea-data-sequence-failure-card {
+  border-radius: 10px;
+  border: 1px solid rgba(255, 120, 120, 0.16);
+  background:
+    linear-gradient(180deg, rgba(120, 18, 18, 0.18), rgba(60, 10, 10, 0.08));
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ea-data-sequence-failure-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ea-data-sequence-failure-title {
+  color: rgba(255, 150, 150, 0.92);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.45px;
+  text-transform: uppercase;
+}
+.ea-data-sequence-failure-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ea-data-sequence-failure-line {
+  color: rgba(235, 235, 240, 0.9);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.ea-data-sequence-failure-label {
+  color: rgba(200, 200, 210, 0.58);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.35px;
+  text-transform: uppercase;
+  margin-right: 8px;
+}
+.ea-data-sequence-failure-reason {
+  color: rgba(255, 210, 210, 0.92);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
 }
 .ea-data-sequence-counter {
   min-height: 68px;
@@ -18347,6 +18399,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         .toLowerCase();
       if (!text) return "idle";
       if (text === "completed") return "completed";
+      if (text === "partial") return "partial";
       if (text === "failed") return "failed";
       if (text === "stopped") return "stopped";
       if (text === "invalid") return "invalid";
@@ -18372,20 +18425,59 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       return text || "";
     }
 
+    const isSequenceUserStopReason = (value) => {
+      const text = normalizeSequenceRuntimeCopy(value).toLowerCase();
+      return text.startsWith("stopped by user");
+    };
+
     function buildSequenceRuntimePrimaryMessage({
       statusKey,
       runtimeStatusText,
       stopReason,
       firstErrorMessage,
+      latestFailureContext,
     }) {
       const normalizedStatus = normalizeRunStatusKey(statusKey);
       const pieces = [];
       const runtimeCopy = normalizeSequenceRuntimeCopy(runtimeStatusText);
       const normalizedStopReason = normalizeSequenceRuntimeCopy(stopReason);
       const normalizedFirstError = normalizeSequenceRuntimeCopy(firstErrorMessage);
+      const normalizedFailureSummary = normalizeSequenceRuntimeCopy(
+        buildSequenceFailureSummary(latestFailureContext),
+      );
+      const normalizedPartialFailureSummary = normalizeSequenceRuntimeCopy(
+        buildSequenceFailureSummary(latestFailureContext, { mode: "partial" }),
+      );
 
       if (normalizedStatus === "completed") {
         return "Sequence completed.";
+      }
+
+      if (normalizedStatus === "partial") {
+        if (normalizedPartialFailureSummary) {
+          return "Partial run. See latest issue below.";
+        }
+        if (normalizedStopReason) return `Partial run • ${normalizedStopReason}`;
+        return "Partial run • skipped challenges remain.";
+      }
+
+      if (normalizedStatus === "failed" || normalizedStatus === "stopped") {
+        if (
+          normalizedStatus === "stopped" &&
+          isSequenceUserStopReason(normalizedStopReason)
+        ) {
+          return normalizedStopReason;
+        }
+        if (normalizedFailureSummary) {
+          return normalizedStatus === "failed"
+            ? "Sequence failed. See latest issue below."
+            : "Sequence stopped. See latest issue below.";
+        }
+        if (normalizedStopReason) return normalizedStopReason;
+        if (normalizedFirstError) return normalizedFirstError;
+        return normalizedStatus === "failed"
+          ? "Sequence failed."
+          : "Sequence stopped.";
       }
 
       if (runtimeCopy) {
@@ -18405,6 +18497,179 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       }
 
       return pieces.join(" • ");
+    }
+
+    const resolveSequenceTerminalState = (
+      runState,
+      { abortRequested = false, noWorkStopReason = null } = {},
+    ) => {
+      if (!runState || typeof runState !== "object") {
+        return {
+          status: "idle",
+          stopReason: null,
+        };
+      }
+      if (runState.status !== "running") {
+        return {
+          status: runState.status,
+          stopReason: runState.stopReason ?? null,
+        };
+      }
+      if (abortRequested) {
+        return {
+          status: "stopped",
+          stopReason: "Stopped by user at a safe boundary.",
+        };
+      }
+      const hadSoftFailures = Boolean(runState?.hadSoftFailures);
+      if (hadSoftFailures) {
+        return {
+          status: "partial",
+          stopReason:
+            buildSequenceFailureSummary(runState?.latestFailureContext, {
+              mode: "partial",
+            }) ||
+            noWorkStopReason ||
+            "Skipped challenges remain.",
+        };
+      }
+      return {
+        status: "completed",
+        stopReason: noWorkStopReason,
+      };
+    };
+
+    const getSequenceFailureSourceMeta = (source) => {
+      const normalized = String(source ?? "").toLowerCase();
+      if (normalized === "pool-conflict") {
+        return {
+          label: "Pool Conflict",
+          sectionLabel: "Pool Exclusion",
+        };
+      }
+      if (normalized === "slot-unavailable" || normalized === "challenge-data") {
+        return {
+          label: "Challenge Data",
+          sectionLabel: "Challenge Data",
+        };
+      }
+      if (normalized === "submit") {
+        return {
+          label: "Submit Error",
+          sectionLabel: "Submit",
+        };
+      }
+      if (normalized === "system") {
+        return {
+          label: "System",
+          sectionLabel: "System",
+        };
+      }
+      return {
+        label: "Solver",
+        sectionLabel: "Solver",
+      };
+    };
+
+    const createSequenceRuntimeFailureContext = ({
+      source = "solver",
+      reason = null,
+      challengeId = null,
+      challengeName = null,
+      stepId = null,
+      stepLabel = null,
+      phase = null,
+      failingRequirements = [],
+      at = Date.now(),
+    } = {}) => ({
+      source: sanitizeDisplayText(source) ?? "solver",
+      reason:
+        sanitizeDisplayText(reason) ?? "No feasible squad with current player pool.",
+      challengeId: challengeId == null ? null : String(challengeId),
+      challengeName: sanitizeDisplayText(challengeName) ?? null,
+      stepId: stepId == null ? null : String(stepId),
+      stepLabel: sanitizeDisplayText(stepLabel) ?? null,
+      phase: sanitizeDisplayText(phase) ?? null,
+      failingRequirements: Array.isArray(failingRequirements)
+        ? failingRequirements
+        : [],
+      at: readNumeric(at) ?? Date.now(),
+    });
+
+    const buildSequenceSolverFailureReason = (failingRequirements = []) => {
+      const first = Array.isArray(failingRequirements)
+        ? failingRequirements[0] ?? null
+        : null;
+      const raw = sanitizeDisplayText(
+        first?.label ?? first?.type ?? first?.keyNameNormalized ?? null,
+      );
+      if (!raw) {
+        return "No feasible squad found with the current pool.";
+      }
+      const normalized = raw
+        .replace(/_/g, " ")
+        .replace(/[.\s]+$/g, "")
+        .trim();
+      if (!normalized) {
+        return "No feasible squad found with the current pool.";
+      }
+      return `Couldn't satisfy the ${normalized} requirement.`;
+    };
+
+    const recordSequenceRuntimeFailure = (
+      failureContext,
+      { setFirstError = false } = {},
+    ) => {
+      const runState = sequenceSolveOverlayState?.runState ?? null;
+      if (!runState || !failureContext || typeof failureContext !== "object") {
+        return null;
+      }
+      runState.latestFailureContext = {
+        ...failureContext,
+      };
+      if (setFirstError && !runState.firstError) {
+        runState.firstError = {
+          code: sanitizeDisplayText(failureContext?.source) ?? "SEQUENCE_FAILURE",
+          message:
+            sanitizeDisplayText(failureContext?.reason) ??
+            "Sequence execution failed.",
+          stepId: sanitizeDisplayText(failureContext?.stepId) ?? null,
+        };
+      }
+      return runState.latestFailureContext;
+    };
+
+    function buildSequenceFailureSummary(
+      latestFailureContext,
+      { mode = "stopped" } = {},
+    ) {
+      const context =
+        latestFailureContext && typeof latestFailureContext === "object"
+          ? latestFailureContext
+          : null;
+      if (!context) return "";
+      const challengeLabel = normalizeSequenceRuntimeCopy(
+        context?.challengeName ?? context?.stepLabel ?? null,
+      );
+      const sourceMeta = getSequenceFailureSourceMeta(context?.source);
+      const reasonLabel = normalizeSequenceRuntimeCopy(context?.reason);
+      const parts = [];
+      if (challengeLabel) {
+        parts.push(
+          mode === "partial"
+            ? `Last blocker: ${challengeLabel}`
+            : `Stopped at ${challengeLabel}`,
+        );
+      } else {
+        parts.push(mode === "partial" ? "Last blocker" : "Sequence stopped");
+      }
+      if (sourceMeta?.label) {
+        parts.push(sourceMeta.label);
+      }
+      if (reasonLabel) {
+        parts.push(reasonLabel);
+      }
+      return parts.join(" • ");
     }
 
     function getSequenceProgressFillState({ statusKey, progressPct }) {
@@ -19135,6 +19400,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         runtimeStatusText: state?.runtimeStatusText,
         stopReason: runState?.stopReason,
         firstErrorMessage: runState?.firstError?.message,
+        latestFailureContext: runState?.latestFailureContext,
       });
       const planPass = clampInt(runState?.currentPlanPass ?? 0, 0, 999) ?? 0;
       const planLoopCount = clampSequenceLoopCount(
@@ -19164,13 +19430,23 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         processedChallenges,
         Math.max(0, Math.floor(readNumeric(runState?.plannedChallenges) ?? 0)),
       );
+      const completedProgressUnits = Math.max(
+        processedChallenges * SEQUENCE_PROGRESS_PHASE_UNIT_COUNT,
+        Math.max(0, Math.floor(readNumeric(runState?.completedProgressUnits) ?? 0)),
+      );
+      const plannedProgressUnits = Math.max(
+        completedProgressUnits,
+        plannedChallenges * SEQUENCE_PROGRESS_PHASE_UNIT_COUNT,
+      );
       const rawProgressPct =
-        plannedChallenges > 0
+        plannedProgressUnits > 0
           ? Math.max(
               0,
               Math.min(
                 100,
-                Math.round((processedChallenges / plannedChallenges) * 100),
+                Math.round(
+                  (completedProgressUnits / plannedProgressUnits) * 100,
+                ),
               ),
             )
           : 0;
@@ -19273,6 +19549,49 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             .join("")
         : '<span class="ea-data-pill">No submitted players yet</span>';
       const runtimeSteps = Array.isArray(runState?.steps) ? runState.steps : [];
+      const latestFailureContext =
+        runState?.latestFailureContext &&
+        typeof runState.latestFailureContext === "object"
+          ? runState.latestFailureContext
+          : null;
+      const showFailureCard =
+        latestFailureContext &&
+        (runBadgeStatus === "failed" ||
+          runBadgeStatus === "partial" ||
+          (runBadgeStatus === "stopped" &&
+            !isSequenceUserStopReason(runState?.stopReason)));
+      const failureCardMarkup = showFailureCard
+        ? (() => {
+            const sourceMeta = getSequenceFailureSourceMeta(
+              latestFailureContext?.source,
+            );
+            return `
+              <div class="ea-data-sequence-failure-card">
+                <div class="ea-data-sequence-failure-head">
+                  <div class="ea-data-sequence-failure-title">Latest Failure</div>
+                  <div class="ea-data-sequence-run-badge" data-status="failed">${escapeHtml(
+                    sanitizeDisplayText(sourceMeta?.label) ?? "Failed",
+                  )}</div>
+                </div>
+                <div class="ea-data-sequence-failure-copy">
+                  <div class="ea-data-sequence-failure-line"><span class="ea-data-sequence-failure-label">Step</span>${escapeHtml(
+                    sanitizeDisplayText(latestFailureContext?.stepLabel) ?? "n/a",
+                  )}</div>
+                  <div class="ea-data-sequence-failure-line"><span class="ea-data-sequence-failure-label">Challenge</span>${escapeHtml(
+                    sanitizeDisplayText(latestFailureContext?.challengeName) ?? "n/a",
+                  )}</div>
+                  <div class="ea-data-sequence-failure-line"><span class="ea-data-sequence-failure-label">Source</span>${escapeHtml(
+                    sanitizeDisplayText(sourceMeta?.sectionLabel) ?? "Unknown",
+                  )}</div>
+                  <div class="ea-data-sequence-failure-reason"><span class="ea-data-sequence-failure-label">Reason</span>${escapeHtml(
+                    sanitizeDisplayText(latestFailureContext?.reason) ??
+                      "Sequence execution failed.",
+                  )}</div>
+                </div>
+              </div>
+            `;
+          })()
+        : "";
       const stepRows = runtimeSteps.length
         ? runtimeSteps
             .map((step) => {
@@ -19360,6 +19679,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 )}</div>
               </div>
             </div>
+            ${failureCardMarkup}
             <div class="ea-data-sequence-used-list">${usedEntriesMarkup}</div>
             <div class="ea-data-used-summary">
               <div class="ea-data-used-summary-top">
@@ -20024,6 +20344,70 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       entries: [],
     });
 
+    const SEQUENCE_PROGRESS_PHASE_UNIT_COUNT = 5;
+
+    const getSequenceProgressPhaseRank = (value) => {
+      const phase = String(value ?? "")
+        .trim()
+        .toLowerCase();
+      if (!phase) return 0;
+      if (phase === "refreshing" || phase === "loading" || phase === "prepare") {
+        return 1;
+      }
+      if (phase === "solving") return 2;
+      if (phase === "applying") return 3;
+      if (phase === "submitting") return 4;
+      if (
+        phase === "solved" ||
+        phase === "skipped" ||
+        phase === "failed" ||
+        phase === "terminal"
+      ) {
+        return SEQUENCE_PROGRESS_PHASE_UNIT_COUNT;
+      }
+      return 0;
+    };
+
+    const buildSequenceProgressAttemptKey = ({
+      planPass = null,
+      stepId = null,
+      stepLoopPass = null,
+      descriptor = null,
+    } = {}) => {
+      const challengeKey =
+        descriptor?.challengeId ??
+        descriptor?.challengeIndex ??
+        descriptor?.challengeName ??
+        "challenge";
+      return [
+        readNumeric(planPass) ?? 0,
+        sanitizeDisplayText(stepId) ?? "step",
+        readNumeric(stepLoopPass) ?? 0,
+        sanitizeDisplayText(challengeKey) ?? "challenge",
+      ].join("::");
+    };
+
+    const markRunProgressPhase = (runState, attemptKey, phaseName) => {
+      if (!runState || !attemptKey) return false;
+      const nextRank = getSequenceProgressPhaseRank(phaseName);
+      if (nextRank <= 0) return false;
+      if (
+        !runState.progressPhaseByAttempt ||
+        typeof runState.progressPhaseByAttempt !== "object"
+      ) {
+        runState.progressPhaseByAttempt = {};
+      }
+      const key = String(attemptKey);
+      const prevRank =
+        readNumeric(runState.progressPhaseByAttempt?.[key]) ?? 0;
+      if (nextRank <= prevRank) return false;
+      runState.progressPhaseByAttempt[key] = nextRank;
+      runState.completedProgressUnits =
+        (readNumeric(runState.completedProgressUnits) ?? 0) +
+        (nextRank - prevRank);
+      return true;
+    };
+
     const getRunProcessedChallengeCount = (runState) =>
       (readNumeric(runState?.counters?.solved) ?? 0) +
       (readNumeric(runState?.counters?.skipped) ?? 0) +
@@ -20147,6 +20531,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       usedSummary: createEmptyRunUsedSummary(),
       firstError: null,
       stopReason: null,
+      latestFailureContext: null,
+      hadSoftFailures: false,
+      completedProgressUnits: 0,
+      progressPhaseByAttempt: {},
       steps: (plan?.steps ?? []).map((step, index) => ({
         stepId: step?.id,
         label: buildStepExecutionLabel(step, index),
@@ -20316,12 +20704,42 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const shouldAbort = () =>
         Boolean(sequenceSolveOverlayState?.abortRequested);
       const challengeName = descriptor?.challengeName ?? "Challenge";
+      const progressAttemptKey = buildSequenceProgressAttemptKey({
+        planPass: runContext?.currentPlanPass,
+        stepId: step?.id ?? null,
+        stepLoopPass: runContext?.currentStepLoopPass,
+        descriptor,
+      });
       const notifyPhase = (phase, message) => {
+        markRunProgressPhase(
+          sequenceSolveOverlayState?.runState,
+          progressAttemptKey,
+          phase,
+        );
         if (typeof onPhaseChange !== "function") return;
         try {
           onPhaseChange(phase, message);
         } catch {}
       };
+      const buildFailureContext = ({
+        source = "solver",
+        reason = null,
+        phase = null,
+        failingRequirements = [],
+      } = {}) =>
+        createSequenceRuntimeFailureContext({
+          source,
+          reason,
+          challengeId: descriptor?.challengeId ?? null,
+          challengeName: descriptor?.challengeName ?? challengeName,
+          stepId: step?.id ?? null,
+          stepLabel:
+            sanitizeDisplayText(runContext?.currentStepLabel) ??
+            sanitizeDisplayText(sequenceSolveOverlayState?.runState?.currentStepLabel) ??
+            null,
+          phase,
+          failingRequirements,
+        });
 
       notifyPhase("refreshing", `Refreshing ${challengeName}...`);
       const challengeEntity = await getChallengeEntityForSubmission(
@@ -20330,10 +20748,20 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         descriptor?.challengeName,
       );
       if (!challengeEntity) {
+        markRunProgressPhase(
+          sequenceSolveOverlayState?.runState,
+          progressAttemptKey,
+          "skipped",
+        );
         return {
           status: "skipped",
           code: "STEP_DATA_STALE",
           message: `${challengeName} is no longer available.`,
+          failureContext: buildFailureContext({
+            source: "challenge-data",
+            reason: `${challengeName} is no longer available.`,
+            phase: "refreshing",
+          }),
         };
       }
 
@@ -20395,10 +20823,20 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       }
 
       if (!hasUsableSlots) {
+        markRunProgressPhase(
+          sequenceSolveOverlayState?.runState,
+          progressAttemptKey,
+          "skipped",
+        );
         return {
           status: "skipped",
           code: "STEP_DATA_STALE",
           message: `${challengeName} has no usable squad slots.`,
+          failureContext: buildFailureContext({
+            source: "challenge-data",
+            reason: `${challengeName} has no usable squad slots.`,
+            phase: "loading",
+          }),
         };
       }
 
@@ -20418,12 +20856,23 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         const notice = buildSolverPoolConflictNotice(poolConflict, {
           challengeName: descriptor?.challengeName,
         });
+        const reason =
+          notice?.reason ??
+          "Current step exclusions conflict with challenge requirements.";
+        markRunProgressPhase(
+          sequenceSolveOverlayState?.runState,
+          progressAttemptKey,
+          "skipped",
+        );
         return {
           status: "skipped",
           code: "NO_SOLUTION",
-          message:
-            notice?.reason ??
-            "Current step exclusions conflict with challenge requirements.",
+          message: reason,
+          failureContext: buildFailureContext({
+            source: "pool-conflict",
+            reason,
+            phase: "solving",
+          }),
         };
       }
 
@@ -20433,10 +20882,20 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           step?.settingsSnapshot,
         );
       if (!Array.isArray(filteredPlayers) || !filteredPlayers.length) {
+        markRunProgressPhase(
+          sequenceSolveOverlayState?.runState,
+          progressAttemptKey,
+          "skipped",
+        );
         return {
           status: "skipped",
           code: "NO_SOLUTION",
           message: "No players remain after applying this step's filters.",
+          failureContext: buildFailureContext({
+            source: "solver",
+            reason: "No players remain after applying this step's filters.",
+            phase: "solving",
+          }),
         };
       }
 
@@ -20476,15 +20935,22 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         const failing = Array.isArray(solveResult?.failingRequirements)
           ? solveResult.failingRequirements
           : [];
-        const firstFail = failing[0] ?? null;
+        const reason = buildSequenceSolverFailureReason(failing);
+        markRunProgressPhase(
+          sequenceSolveOverlayState?.runState,
+          progressAttemptKey,
+          "skipped",
+        );
         return {
           status: "skipped",
           code: "NO_SOLUTION",
-          message:
-            firstFail?.label ??
-            firstFail?.type ??
-            firstFail?.keyNameNormalized ??
-            "No feasible squad found with the current pool.",
+          message: reason,
+          failureContext: buildFailureContext({
+            source: "solver",
+            reason,
+            phase: "solving",
+            failingRequirements: failing,
+          }),
         };
       }
 
@@ -20492,29 +20958,96 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         ? solveResult.solutions[0]
         : [];
       if (!solutionIds.length) {
+        markRunProgressPhase(
+          sequenceSolveOverlayState?.runState,
+          progressAttemptKey,
+          "skipped",
+        );
         return {
           status: "skipped",
           code: "NO_SOLUTION",
           message: "Solver returned an empty squad.",
+          failureContext: buildFailureContext({
+            source: "solver",
+            reason: "Solver returned an empty squad.",
+            phase: "solving",
+          }),
         };
       }
 
       notifyPhase("applying", `Applying ${challengeName}...`);
-      await applySolutionWithSelectedMode(challengeEntity, solutionIds, {
-        lookupKey: "id",
-        slotSolution: solveResult?.solutionSlots?.[0] ?? null,
-        playerById: runContext?.playerById ?? null,
-        preserveExistingValid: false,
-        preHydratedChallenge: true,
-      });
-      await delayMs(jitterMs(350, 0.35));
+      try {
+        await applySolutionWithSelectedMode(challengeEntity, solutionIds, {
+          lookupKey: "id",
+          slotSolution: solveResult?.solutionSlots?.[0] ?? null,
+          playerById: runContext?.playerById ?? null,
+          preserveExistingValid: false,
+          preHydratedChallenge: true,
+        });
+        await delayMs(jitterMs(350, 0.35));
+      } catch (error) {
+        const message =
+          sanitizeDisplayText(error?.message) ??
+          `${challengeName} could not be applied.`;
+        markRunProgressPhase(
+          sequenceSolveOverlayState?.runState,
+          progressAttemptKey,
+          "failed",
+        );
+        return {
+          status: "failed",
+          code: "APPLY_FAILED",
+          message,
+          failureContext: buildFailureContext({
+            source: "system",
+            reason: message,
+            phase: "applying",
+          }),
+        };
+      }
 
       notifyPhase("submitting", `Submitting ${challengeName}...`);
-      const submitResult = await submitSbcChallenge(challengeEntity);
-      if (!submitResult?.success) {
-        throw new Error(
-          `${challengeName} submit failed (${submitResult?.error ?? submitResult?.status ?? "unknown"}).`,
+      let submitResult = null;
+      try {
+        submitResult = await submitSbcChallenge(challengeEntity);
+      } catch (error) {
+        const message =
+          sanitizeDisplayText(error?.message) ??
+          `${challengeName} submit failed.`;
+        markRunProgressPhase(
+          sequenceSolveOverlayState?.runState,
+          progressAttemptKey,
+          "failed",
         );
+        return {
+          status: "failed",
+          code: "SUBMIT_FAILED",
+          message,
+          failureContext: buildFailureContext({
+            source: "submit",
+            reason: message,
+            phase: "submitting",
+          }),
+        };
+      }
+      if (!submitResult?.success) {
+        const errorCode = submitResult?.error ?? submitResult?.status ?? "unknown";
+        const reason = `Submit failed (${errorCode}).`;
+        markRunProgressPhase(
+          sequenceSolveOverlayState?.runState,
+          progressAttemptKey,
+          "failed",
+        );
+        return {
+          status: "failed",
+          code: "SUBMIT_FAILED",
+          message: `${challengeName} ${reason}`,
+          failureContext: buildFailureContext({
+            source: "submit",
+            reason,
+            phase: "submitting",
+          }),
+        };
       }
 
       recordRunUsedPlayers(solutionIds, runContext, {
@@ -20540,6 +21073,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       if (!shouldAbort()) {
         await delayMs(jitterMs(2200, 0.2));
       }
+      markRunProgressPhase(
+        sequenceSolveOverlayState?.runState,
+        progressAttemptKey,
+        "solved",
+      );
       return {
         status: "solved",
         code: "SOLVED",
@@ -20559,32 +21097,6 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         });
         return;
       }
-      await ensurePlanSelections(activePlan, { forceChallenges: true });
-      const validationSummary = getPlanValidation(activePlan);
-      const enabledSteps = (activePlan?.steps ?? []).filter(
-        (step) => step?.enabled !== false,
-      );
-      if (!enabledSteps.length) {
-        showToast({
-          type: "error",
-          title: "No Enabled Steps",
-          message: "Enable at least one sequence step before starting.",
-          timeoutMs: 5000,
-        });
-        return;
-      }
-      if (validationSummary.invalidEnabledSteps.length) {
-        showToast({
-          type: "error",
-          title: "Sequence Cannot Start",
-          message:
-            validationSummary.invalidEnabledSteps[0]?.reason ??
-            "One or more enabled steps need re-selection.",
-          timeoutMs: 6500,
-        });
-        return;
-      }
-
       const requestedPlanLoops = clampSequenceLoopCount(
         activePlan?.policy?.planLoopCount ?? 1,
         1,
@@ -20606,6 +21118,38 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       render();
 
       try {
+        await ensurePlanSelections(activePlan, { forceChallenges: true });
+        const validationSummary = getPlanValidation(activePlan);
+        const enabledSteps = (activePlan?.steps ?? []).filter(
+          (step) => step?.enabled !== false,
+        );
+        if (!enabledSteps.length) {
+          sequenceSolveOverlayState.running = false;
+          sequenceSolveOverlayState.runtimeStatusText = "";
+          render();
+          showToast({
+            type: "error",
+            title: "No Enabled Steps",
+            message: "Enable at least one sequence step before starting.",
+            timeoutMs: 5000,
+          });
+          return;
+        }
+        if (validationSummary.invalidEnabledSteps.length) {
+          sequenceSolveOverlayState.running = false;
+          sequenceSolveOverlayState.runtimeStatusText = "";
+          render();
+          showToast({
+            type: "error",
+            title: "Sequence Cannot Start",
+            message:
+              validationSummary.invalidEnabledSteps[0]?.reason ??
+              "One or more enabled steps need re-selection.",
+            timeoutMs: 6500,
+          });
+          return;
+        }
+
         if (!(await isSequenceFeatureEnabled())) {
           throw new Error("Sequence solver is disabled by feature flag.");
         }
@@ -20657,6 +21201,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           prioritize: payload?.prioritize ?? null,
           baseFilters,
           currentStepLabel: null,
+          currentPlanPass: 0,
+          currentStepLoopPass: 0,
           baseExcludedPlayerIds: new Set(
             (baseFilters?.excludedPlayerIds ?? [])
               .map((value) => (value == null ? null : String(value)))
@@ -20726,6 +21272,8 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                 stepLoopCount,
               });
               runContext.currentStepLabel = stepLabel;
+              runContext.currentPlanPass = planPass;
+              runContext.currentStepLoopPass = stepLoopPass;
               updateRunStep(step.id, {
                 label: stepLabel,
                 status: "resolving",
@@ -20743,6 +21291,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               const resolved = await resolveStepDescriptors(step);
               if (!resolved?.ok || !resolved?.items?.length) {
                 bumpRunCounters("skipped", step.id);
+                sequenceSolveOverlayState.runState.hadSoftFailures = true;
                 updateRunStep(step.id, {
                   status: "skipped",
                   message:
@@ -20797,6 +21346,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   }
                   if (outcome?.status === "skipped") {
                     bumpRunCounters("skipped", step.id);
+                    sequenceSolveOverlayState.runState.hadSoftFailures = true;
+                    if (outcome?.failureContext) {
+                      recordSequenceRuntimeFailure(outcome.failureContext);
+                    }
                     updateRunStep(step.id, {
                       status: "skipped",
                       message: outcome?.message ?? "Skipped.",
@@ -20806,6 +21359,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   hardFailure = {
                     code: outcome?.code ?? "HARD_EA_ERROR",
                     message: outcome?.message ?? "Unknown hard failure.",
+                    failureContext: outcome?.failureContext ?? null,
                   };
                   break;
                 } catch (error) {
@@ -20814,6 +21368,17 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                     message:
                       sanitizeDisplayText(error?.message) ??
                       "Unexpected EA web app error.",
+                    failureContext: createSequenceRuntimeFailureContext({
+                      source: "system",
+                      reason:
+                        sanitizeDisplayText(error?.message) ??
+                        "Unexpected EA web app error.",
+                      challengeId: descriptor?.challengeId ?? null,
+                      challengeName: descriptor?.challengeName ?? null,
+                      stepId: step?.id ?? null,
+                      stepLabel,
+                      phase: null,
+                    }),
                   };
                   break;
                 }
@@ -20826,13 +21391,21 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   message: hardFailure.message,
                 });
                 sequenceSolveOverlayState.runState.status = "failed";
-                if (!sequenceSolveOverlayState.runState.firstError) {
-                  sequenceSolveOverlayState.runState.firstError = {
-                    code: hardFailure.code,
-                    message: hardFailure.message,
-                    stepId: step.id,
-                  };
-                }
+                recordSequenceRuntimeFailure(
+                  hardFailure?.failureContext ??
+                    createSequenceRuntimeFailureContext({
+                      source: "system",
+                      reason: hardFailure.message,
+                      challengeId: null,
+                      challengeName: null,
+                      stepId: step?.id ?? null,
+                      stepLabel,
+                      phase: null,
+                    }),
+                  {
+                    setFirstError: true,
+                  },
+                );
                 sequenceSolveOverlayState.runState.stopReason =
                   hardFailure.message;
                 break planLoop;
@@ -20840,6 +21413,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 
               if (solvedThisStepLoop <= 0) {
                 const remainingLoops = stepLoopCount - stepLoopPass;
+                sequenceSolveOverlayState.runState.hadSoftFailures = true;
                 if (remainingLoops > 0) {
                   updateRunStep(step.id, {
                     status: "skipped",
@@ -20863,14 +21437,16 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         }
 
         if (sequenceSolveOverlayState.runState.status === "running") {
-          if (sequenceSolveOverlayState.abortRequested) {
-            sequenceSolveOverlayState.runState.status = "stopped";
-            sequenceSolveOverlayState.runState.stopReason =
-              "Stopped by user at a safe boundary.";
-          } else {
-            sequenceSolveOverlayState.runState.status = "completed";
-            sequenceSolveOverlayState.runState.stopReason = noWorkStopReason;
-          }
+          const terminalState = resolveSequenceTerminalState(
+            sequenceSolveOverlayState.runState,
+            {
+              abortRequested: sequenceSolveOverlayState.abortRequested,
+              noWorkStopReason,
+            },
+          );
+          sequenceSolveOverlayState.runState.status = terminalState.status;
+          sequenceSolveOverlayState.runState.stopReason =
+            terminalState.stopReason;
         }
 
         if (sequenceSolveOverlayState.runState.status === "completed") {
@@ -20879,6 +21455,13 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             title: "Sequence Complete",
             message: `Solved ${sequenceSolveOverlayState.runState.counters.solved}, skipped ${sequenceSolveOverlayState.runState.counters.skipped}, failed ${sequenceSolveOverlayState.runState.counters.failed}.`,
             timeoutMs: 6500,
+          });
+        } else if (sequenceSolveOverlayState.runState.status === "partial") {
+          showToast({
+            type: "info",
+            title: "Sequence Partial",
+            message: `Solved ${sequenceSolveOverlayState.runState.counters.solved}, skipped ${sequenceSolveOverlayState.runState.counters.skipped}, failed ${sequenceSolveOverlayState.runState.counters.failed}.`,
+            timeoutMs: 7500,
           });
         } else if (sequenceSolveOverlayState.runState.status === "stopped") {
           showToast({
@@ -20915,6 +21498,17 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             stepId: sequenceSolveOverlayState.runState.currentStepId ?? null,
           };
         }
+        recordSequenceRuntimeFailure(
+          createSequenceRuntimeFailureContext({
+            source: "system",
+            reason: message,
+            challengeId: null,
+            challengeName: null,
+            stepId: sequenceSolveOverlayState.runState.currentStepId ?? null,
+            stepLabel: sequenceSolveOverlayState.runState.currentStepLabel ?? null,
+            phase: null,
+          }),
+        );
         showToast({
           type: "error",
           title: "Sequence Failed",
