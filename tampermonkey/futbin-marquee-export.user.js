@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Futbin Challenges Export
 // @namespace    https://futbin.com/
-// @version      0.2.0
+// @version      0.2.1
 // @description  Export Futbin SBC groups and challenge requirements from listing pages.
 // @match        https://www.futbin.com/squad-building-challenges*
 // @grant        none
@@ -209,16 +209,30 @@
     };
   };
 
-  const extractGroupFromDocument = (doc, fallback = {}) => {
-    const formationData = extractFormationData(doc);
+  const extractGroupFromDocument = async (doc, fallback = {}) => {
     const canonical = doc.querySelector('link[rel="canonical"]')?.href || fallback.groupUrl || null;
-    const challenges = [...doc.querySelectorAll(DETAIL_CARD_SELECTOR)].map((card) => {
+    const challenges = [];
+    for (const card of [...doc.querySelectorAll(DETAIL_CARD_SELECTOR)]) {
       const startHref = card.querySelector(START_LINK_SELECTOR)?.getAttribute("href") || null;
       const challengeUrl = startHref ? absoluteUrl(startHref) : null;
+      let formationData = {
+        formationName: null,
+        formationCode: null,
+        formationSource: null,
+        squadSlots: [],
+      };
+      if (challengeUrl) {
+        try {
+          const challengeDoc = await fetchDocument(challengeUrl);
+          formationData = extractFormationData(challengeDoc);
+        } catch (error) {
+          console.warn("[Futbin Challenges Export] Formation fetch failed", challengeUrl, error);
+        }
+      }
       const requirementRows = [...card.querySelectorAll(REQUIREMENT_ROW_SELECTOR)].map(
         extractRequirementRow,
       );
-      return {
+      challenges.push({
         eaChallengeId: parseChallengeIdFromUrl(challengeUrl),
         challengeName: text(card.querySelector(CARD_NAME_SELECTOR)?.textContent),
         challengeUrl,
@@ -228,8 +242,9 @@
         squadSlots: formationData.squadSlots,
         requirementsText: requirementRows.map((entry) => entry.text).filter(Boolean),
         requirementsDetailed: requirementRows,
-      };
-    });
+      });
+      await sleep(150);
+    }
 
     return {
       futbinGroupId: fallback.futbinGroupId ?? parseGroupIdFromUrl(canonical),
@@ -284,13 +299,13 @@
       const group = groupLinks[index];
       setButtonState(button, `Fetching ${index + 1}/${groupLinks.length}...`, true);
       const doc = await fetchDocument(group.groupUrl);
-      groups.push(extractGroupFromDocument(doc, group));
+      groups.push(await extractGroupFromDocument(doc, group));
       await sleep(300);
     }
 
     const payload = {
       source: "futbin",
-      harvestVersion: "0.2.0",
+      harvestVersion: "0.2.1",
       harvestedAt: new Date().toISOString(),
       queryUrl: window.location.href,
       totalListingPages: totalPages,
