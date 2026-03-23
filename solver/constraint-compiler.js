@@ -6,6 +6,7 @@ export const REQUIREMENT_KEYS = [
   "player_quality",
   "player_rarity",
   "player_rarity_group",
+  "player_rarity_or_totw",
   "nation_id",
   "league_id",
   "club_id",
@@ -45,6 +46,7 @@ const TYPE_ALIASES = {
   player_quality: "player_quality",
   player_rarity: "player_rarity",
   player_rarity_group: "player_rarity_group",
+  player_rarity_or_totw: "player_rarity_or_totw",
   nation_id: "nation_id",
   league_id: "league_id",
   club_id: "club_id",
@@ -107,6 +109,7 @@ const CATEGORY_BY_TYPE = {
   player_quality: "player_tier_or_quality",
   player_rarity: "special_or_rarity",
   player_rarity_group: "special_or_rarity",
+  player_rarity_or_totw: "special_or_rarity",
   player_inform: "special_or_rarity",
   legend_count: "special_or_rarity",
   num_trophy_required: "special_or_rarity",
@@ -235,7 +238,6 @@ export const normalizeRequirementType = (rule) => {
 };
 
 const deriveValuesFromLabel = (rule, fallback = []) => {
-  if (fallback.length) return fallback;
   const label = normalizeString(rule?.label || rule?.raw?.label);
   if (!label) return fallback;
   if (rule?.type === "player_quality" || rule?.type === "player_level") {
