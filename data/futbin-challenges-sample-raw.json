@@ -1,0 +1,199 @@
+{
+  "source": "futbin",
+  "harvestVersion": "0.2.0",
+  "harvestedAt": "2026-03-23T00:00:00.000Z",
+  "queryUrl": "https://www.futbin.com/squad-building-challenges/Challenges?active=all",
+  "totalListingPages": 3,
+  "listingPageUrls": [
+    "https://www.futbin.com/squad-building-challenges/Challenges?active=all",
+    "https://www.futbin.com/squad-building-challenges/Challenges?active=all&page=2",
+    "https://www.futbin.com/squad-building-challenges/Challenges?active=all&page=3"
+  ],
+  "totalGroups": 1,
+  "totalChallenges": 2,
+  "groups": [
+    {
+      "futbinGroupId": 647,
+      "year": 26,
+      "groupName": "Mixed SBC Test",
+      "groupDescription": "Sample fixture for full challenges export verification",
+      "groupUrl": "https://www.futbin.com/26/squad-building-challenge/647",
+      "challenges": [
+        {
+          "eaChallengeId": 18,
+          "challengeName": "Gold Upgrade",
+          "challengeUrl": "https://www.futbin.com/squad-building-challenge/ea/18/gold-upgrade",
+          "formationName": "4-4-2",
+          "formationCode": "442",
+          "formationSource": "challenge-react-data",
+          "squadSlots": [
+            {
+              "slotId": "cardlid1",
+              "slotIndex": 0,
+              "positionName": "ST"
+            },
+            {
+              "slotId": "cardlid2",
+              "slotIndex": 1,
+              "positionName": "ST"
+            },
+            {
+              "slotId": "cardlid3",
+              "slotIndex": 2,
+              "positionName": "LM"
+            },
+            {
+              "slotId": "cardlid4",
+              "slotIndex": 3,
+              "positionName": "CM"
+            },
+            {
+              "slotId": "cardlid5",
+              "slotIndex": 4,
+              "positionName": "CM"
+            },
+            {
+              "slotId": "cardlid6",
+              "slotIndex": 5,
+              "positionName": "RM"
+            },
+            {
+              "slotId": "cardlid7",
+              "slotIndex": 6,
+              "positionName": "LB"
+            },
+            {
+              "slotId": "cardlid8",
+              "slotIndex": 7,
+              "positionName": "CB"
+            },
+            {
+              "slotId": "cardlid9",
+              "slotIndex": 8,
+              "positionName": "CB"
+            },
+            {
+              "slotId": "cardlid10",
+              "slotIndex": 9,
+              "positionName": "RB"
+            },
+            {
+              "slotId": "cardlid11",
+              "slotIndex": 10,
+              "positionName": "GK"
+            }
+          ],
+          "requirementsText": [
+            "Player Quality: Exactly Gold",
+            "# of players in squad: Exactly 11"
+          ],
+          "requirementsDetailed": [
+            {
+              "text": "Player Quality: Exactly Gold",
+              "images": []
+            },
+            {
+              "text": "# of players in squad: Exactly 11",
+              "images": []
+            }
+          ]
+        },
+        {
+          "eaChallengeId": 900001,
+          "challengeName": "Easy Challenge Test",
+          "challengeUrl": "https://www.futbin.com/squad-building-challenge/ea/900001/easy-challenge-test",
+          "formationName": "3-5-2",
+          "formationCode": "352",
+          "formationSource": "challenge-react-data",
+          "squadSlots": [
+            {
+              "slotId": "cardlid1",
+              "slotIndex": 0,
+              "positionName": "GK"
+            },
+            {
+              "slotId": "cardlid2",
+              "slotIndex": 1,
+              "positionName": "CB"
+            },
+            {
+              "slotId": "cardlid3",
+              "slotIndex": 2,
+              "positionName": "CB"
+            },
+            {
+              "slotId": "cardlid4",
+              "slotIndex": 3,
+              "positionName": "CB"
+            },
+            {
+              "slotId": "cardlid5",
+              "slotIndex": 4,
+              "positionName": "CDM"
+            },
+            {
+              "slotId": "cardlid6",
+              "slotIndex": 5,
+              "positionName": "CDM"
+            },
+            {
+              "slotId": "cardlid7",
+              "slotIndex": 6,
+              "positionName": "LM"
+            },
+            {
+              "slotId": "cardlid8",
+              "slotIndex": 7,
+              "positionName": "RM"
+            },
+            {
+              "slotId": "cardlid9",
+              "slotIndex": 8,
+              "positionName": "CAM"
+            },
+            {
+              "slotId": "cardlid10",
+              "slotIndex": 9,
+              "positionName": "ST"
+            },
+            {
+              "slotId": "cardlid11",
+              "slotIndex": 10,
+              "positionName": "ST"
+            }
+          ],
+          "requirementsText": [
+            "Gold Players: Min 5",
+            "Rare or TOTW: Min 1",
+            "# of players from England: Min 1",
+            "# of players in squad: Exactly 5"
+          ],
+          "requirementsDetailed": [
+            {
+              "text": "Gold Players: Min 5",
+              "images": []
+            },
+            {
+              "text": "Rare or TOTW: Min 1",
+              "images": []
+            },
+            {
+              "text": "# of players from England: Min 1",
+              "images": [
+                {
+                  "alt": "nation",
+                  "title": "England",
+                  "src": "https://cdn.futbin.com/content/fifa26/img/nation/14.png"
+                }
+              ]
+            },
+            {
+              "text": "# of players in squad: Exactly 5",
+              "images": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

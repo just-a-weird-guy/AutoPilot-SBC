@@ -1,0 +1,2427 @@
+{
+  "generatedAt": "2026-03-22T21:32:25.832Z",
+  "mode": "replay",
+  "inputs": {
+    "requirementsPath": "C:\\Users\\USER\\Downloads\\projects\\ea-data-extension\\data\\ea-sbc-requirements-2026-02-13T19-27-15-155Z.json",
+    "playersPath": "C:\\Users\\USER\\Downloads\\projects\\ea-data-extension\\data\\players.json",
+    "challengeRecords": 24,
+    "players": 2025,
+    "dedupedChallenges": false,
+    "useEvolutionPlayers": false
+  },
+  "summary": {
+    "solved": 24,
+    "unsolved": 0,
+    "solveRatePct": 100,
+    "withConstraints": 24,
+    "signatures": {
+      "players_in_squad|exact|11|[11] || team_rating|min|88|[88]": 2,
+      "player_quality|exact|11|[\"gold\"] || players_in_squad|exact|11|[11]": 2,
+      "player_level|min|5|[\"bronze\"] || player_level|min|5|[\"silver\"] || players_in_squad|exact|10|[10]": 2,
+      "player_level|min|1|[\"silver\"] || players_in_squad|exact|1|[1]": 2,
+      "players_in_squad|exact|11|[11] || team_rating|min|85|[85]": 1,
+      "players_in_squad|exact|11|[11] || team_rating|min|86|[86]": 1,
+      "players_in_squad|exact|11|[11] || team_rating|min|87|[87]": 1,
+      "players_in_squad|exact|11|[11] || team_rating|min|89|[89]": 1,
+      "player_rarity|min|1|[3] || players_in_squad|exact|11|[11] || team_rating|min|85|[85]": 1,
+      "player_rarity|min|1|[3] || players_in_squad|exact|11|[11] || team_rating|min|86|[86]": 1,
+      "player_rarity|min|1|[3] || players_in_squad|exact|11|[11] || team_rating|min|87|[87]": 1,
+      "players_in_squad|exact|11|[11] || team_rating|min|83|[83]": 1,
+      "league_id|min|1|[31] || players_in_squad|exact|11|[11] || team_rating|min|84|[84]": 1,
+      "nation_id|min|1|[54] || players_in_squad|exact|11|[11] || team_rating|min|85|[85]": 1,
+      "player_quality|exact|7|[\"gold\"] || player_rarity_group|min|2|[\"rare\"] || players_in_squad|exact|7|[7]": 1,
+      "player_quality|exact|6|[\"gold\"] || player_rarity_group|min|3|[\"rare\"] || players_in_squad|exact|6|[6]": 1,
+      "player_rarity|min|1|[3] || players_in_squad|exact|11|[11] || team_rating|min|84|[84]": 1,
+      "player_min_ovr|min|3|[85] || players_in_squad|exact|3|[3]": 1,
+      "player_level|min|5|[\"gold\"] || players_in_squad|exact|5|[5]": 1,
+      "player_quality|exact|11|[\"silver\"] || players_in_squad|exact|11|[11]": 1
+    },
+    "constraintTypes": {
+      "players_in_squad": 24,
+      "team_rating": 13,
+      "player_quality": 5,
+      "player_level": 5,
+      "player_rarity": 4,
+      "player_rarity_group": 2,
+      "league_id": 1,
+      "nation_id": 1,
+      "player_min_ovr": 1
+    },
+    "constraintCategories": {
+      "squad_size": 24,
+      "team_metric": 13,
+      "player_tier_or_quality": 10,
+      "special_or_rarity": 6,
+      "identity_quota": 2,
+      "player_ovr_gate": 1
+    },
+    "unsolvedTypes": {},
+    "evoUsedAcrossSolved": 0
+  },
+  "results": [
+    {
+      "challengeId": 1330,
+      "setId": 467,
+      "challengeName": "85-Rated Squad",
+      "openedAt": "2026-02-13T19:20:53.176Z",
+      "signature": "players_in_squad|exact|11|[11] || team_rating|min|85|[85]",
+      "constraintCount": 2,
+      "constraintTypes": [
+        "team_rating",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "team_metric",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": 85,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 84.55,
+        "adjustedAverage": 84.98,
+        "squadRating": 85,
+        "ratingTarget": 85,
+        "timingsMs": {
+          "normalizePlayers": 2,
+          "compileConstraints": 1,
+          "normalizeRules": 0,
+          "buildSquad": 11,
+          "ratingImprove": 14,
+          "preserve": 8,
+          "total": 37
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": true,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 2,
+          "compiledCount": 2,
+          "unsupportedCount": 0,
+          "byType": {
+            "team_rating": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "team_metric": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": 85
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1331,
+      "setId": 467,
+      "challengeName": "86-Rated Squad",
+      "openedAt": "2026-02-13T19:20:59.139Z",
+      "signature": "players_in_squad|exact|11|[11] || team_rating|min|86|[86]",
+      "constraintCount": 2,
+      "constraintTypes": [
+        "team_rating",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "team_metric",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": 86,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 85.55,
+        "adjustedAverage": 85.98,
+        "squadRating": 86,
+        "ratingTarget": 86,
+        "timingsMs": {
+          "normalizePlayers": 1,
+          "compileConstraints": 1,
+          "normalizeRules": 0,
+          "buildSquad": 10,
+          "ratingImprove": 6,
+          "preserve": 4,
+          "total": 22
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": true,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 2,
+          "compiledCount": 2,
+          "unsupportedCount": 0,
+          "byType": {
+            "team_rating": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "team_metric": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": 86
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1332,
+      "setId": 467,
+      "challengeName": "87-Rated Squad",
+      "openedAt": "2026-02-13T19:21:05.562Z",
+      "signature": "players_in_squad|exact|11|[11] || team_rating|min|87|[87]",
+      "constraintCount": 2,
+      "constraintTypes": [
+        "team_rating",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "team_metric",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": 87,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 86.55,
+        "adjustedAverage": 86.98,
+        "squadRating": 87,
+        "ratingTarget": 87,
+        "timingsMs": {
+          "normalizePlayers": 0,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 2,
+          "ratingImprove": 8,
+          "preserve": 4,
+          "total": 14
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": true,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 2,
+          "compiledCount": 2,
+          "unsupportedCount": 0,
+          "byType": {
+            "team_rating": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "team_metric": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": 87
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1333,
+      "setId": 467,
+      "challengeName": "88-Rated Squad",
+      "openedAt": "2026-02-13T19:21:10.376Z",
+      "signature": "players_in_squad|exact|11|[11] || team_rating|min|88|[88]",
+      "constraintCount": 2,
+      "constraintTypes": [
+        "team_rating",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "team_metric",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": 88,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 87.55,
+        "adjustedAverage": 87.98,
+        "squadRating": 88,
+        "ratingTarget": 88,
+        "timingsMs": {
+          "normalizePlayers": 1,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 3,
+          "ratingImprove": 6,
+          "preserve": 4,
+          "total": 14
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": true,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 2,
+          "compiledCount": 2,
+          "unsupportedCount": 0,
+          "byType": {
+            "team_rating": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "team_metric": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": 88
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1334,
+      "setId": 467,
+      "challengeName": "88-Rated Squad",
+      "openedAt": "2026-02-13T19:21:15.024Z",
+      "signature": "players_in_squad|exact|11|[11] || team_rating|min|88|[88]",
+      "constraintCount": 2,
+      "constraintTypes": [
+        "team_rating",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "team_metric",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": 88,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 87.55,
+        "adjustedAverage": 87.98,
+        "squadRating": 88,
+        "ratingTarget": 88,
+        "timingsMs": {
+          "normalizePlayers": 0,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 10,
+          "ratingImprove": 5,
+          "preserve": 3,
+          "total": 18
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": true,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 2,
+          "compiledCount": 2,
+          "unsupportedCount": 0,
+          "byType": {
+            "team_rating": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "team_metric": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": 88
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1344,
+      "setId": 467,
+      "challengeName": "89-Rated Squad",
+      "openedAt": "2026-02-13T19:21:30.468Z",
+      "signature": "players_in_squad|exact|11|[11] || team_rating|min|89|[89]",
+      "constraintCount": 2,
+      "constraintTypes": [
+        "team_rating",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "team_metric",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": 89,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 88.55,
+        "adjustedAverage": 88.98,
+        "squadRating": 89,
+        "ratingTarget": 89,
+        "timingsMs": {
+          "normalizePlayers": 0,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 10,
+          "ratingImprove": 4,
+          "preserve": 1,
+          "total": 15
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": true,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 2,
+          "compiledCount": 2,
+          "unsupportedCount": 0,
+          "byType": {
+            "team_rating": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "team_metric": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": 89
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1567,
+      "setId": 529,
+      "challengeName": "85-Rated Squad",
+      "openedAt": "2026-02-13T19:21:54.609Z",
+      "signature": "player_rarity|min|1|[3] || players_in_squad|exact|11|[11] || team_rating|min|85|[85]",
+      "constraintCount": 3,
+      "constraintTypes": [
+        "team_rating",
+        "player_rarity",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "team_metric",
+        "special_or_rarity",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": 85,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 84.55,
+        "adjustedAverage": 84.98,
+        "squadRating": 85,
+        "ratingTarget": 85,
+        "timingsMs": {
+          "normalizePlayers": 0,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 4,
+          "ratingImprove": 6,
+          "preserve": 5,
+          "total": 15
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_rarity",
+            "method": "prefill",
+            "required": 1,
+            "filled": true,
+            "slotSatisfied": 0
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": true,
+          "player_quality": false,
+          "player_rarity": true,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 3,
+          "compiledCount": 3,
+          "unsupportedCount": 0,
+          "byType": {
+            "team_rating": 1,
+            "player_rarity": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "team_metric": 1,
+            "special_or_rarity": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": 85
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1543,
+      "setId": 523,
+      "challengeName": "86-Rated Squad",
+      "openedAt": "2026-02-13T19:22:21.302Z",
+      "signature": "player_rarity|min|1|[3] || players_in_squad|exact|11|[11] || team_rating|min|86|[86]",
+      "constraintCount": 3,
+      "constraintTypes": [
+        "player_rarity",
+        "team_rating",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "special_or_rarity",
+        "team_metric",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": 86,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 85.55,
+        "adjustedAverage": 85.98,
+        "squadRating": 86,
+        "ratingTarget": 86,
+        "timingsMs": {
+          "normalizePlayers": 0,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 4,
+          "ratingImprove": 11,
+          "preserve": 5,
+          "total": 20
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_rarity",
+            "method": "prefill",
+            "required": 1,
+            "filled": true,
+            "slotSatisfied": 0
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": true,
+          "player_quality": false,
+          "player_rarity": true,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 3,
+          "compiledCount": 3,
+          "unsupportedCount": 0,
+          "byType": {
+            "player_rarity": 1,
+            "team_rating": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "special_or_rarity": 1,
+            "team_metric": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": 86
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1545,
+      "setId": 523,
+      "challengeName": "87-Rated Squad",
+      "openedAt": "2026-02-13T19:22:28.516Z",
+      "signature": "player_rarity|min|1|[3] || players_in_squad|exact|11|[11] || team_rating|min|87|[87]",
+      "constraintCount": 3,
+      "constraintTypes": [
+        "player_rarity",
+        "team_rating",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "special_or_rarity",
+        "team_metric",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": 87,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 86.55,
+        "adjustedAverage": 86.98,
+        "squadRating": 87,
+        "ratingTarget": 87,
+        "timingsMs": {
+          "normalizePlayers": 0,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 9,
+          "ratingImprove": 5,
+          "preserve": 2,
+          "total": 16
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_rarity",
+            "method": "prefill",
+            "required": 1,
+            "filled": true,
+            "slotSatisfied": 0
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": true,
+          "player_quality": false,
+          "player_rarity": true,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 3,
+          "compiledCount": 3,
+          "unsupportedCount": 0,
+          "byType": {
+            "player_rarity": 1,
+            "team_rating": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "special_or_rarity": 1,
+            "team_metric": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": 87
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1512,
+      "setId": 516,
+      "challengeName": "On a Loan",
+      "openedAt": "2026-02-13T19:22:47.561Z",
+      "signature": "players_in_squad|exact|11|[11] || team_rating|min|83|[83]",
+      "constraintCount": 2,
+      "constraintTypes": [
+        "team_rating",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "team_metric",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": 83,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 82.55,
+        "adjustedAverage": 82.98,
+        "squadRating": 83,
+        "ratingTarget": 83,
+        "timingsMs": {
+          "normalizePlayers": 0,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 8,
+          "ratingImprove": 5,
+          "preserve": 6,
+          "total": 19
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": true,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 2,
+          "compiledCount": 2,
+          "unsupportedCount": 0,
+          "byType": {
+            "team_rating": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "team_metric": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": 83
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1513,
+      "setId": 516,
+      "challengeName": "League Legend",
+      "openedAt": "2026-02-13T19:22:51.080Z",
+      "signature": "league_id|min|1|[31] || players_in_squad|exact|11|[11] || team_rating|min|84|[84]",
+      "constraintCount": 3,
+      "constraintTypes": [
+        "league_id",
+        "team_rating",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "identity_quota",
+        "team_metric",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": 84,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 83.55,
+        "adjustedAverage": 83.99,
+        "squadRating": 84,
+        "ratingTarget": 84,
+        "timingsMs": {
+          "normalizePlayers": 1,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 5,
+          "ratingImprove": 1,
+          "preserve": 1044,
+          "total": 1051
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "league_id",
+            "method": "prefill",
+            "required": 1,
+            "filled": true,
+            "slotSatisfied": 0
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": true,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": true,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 3,
+          "compiledCount": 3,
+          "unsupportedCount": 0,
+          "byType": {
+            "league_id": 1,
+            "team_rating": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "identity_quota": 1,
+            "team_metric": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": 84
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1514,
+      "setId": 516,
+      "challengeName": "Most Capped",
+      "openedAt": "2026-02-13T19:23:00.160Z",
+      "signature": "nation_id|min|1|[54] || players_in_squad|exact|11|[11] || team_rating|min|85|[85]",
+      "constraintCount": 3,
+      "constraintTypes": [
+        "nation_id",
+        "team_rating",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "identity_quota",
+        "team_metric",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": 85,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 84.55,
+        "adjustedAverage": 84.98,
+        "squadRating": 85,
+        "ratingTarget": 85,
+        "timingsMs": {
+          "normalizePlayers": 1,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 8,
+          "ratingImprove": 4,
+          "preserve": 6,
+          "total": 19
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "nation_id",
+            "method": "prefill",
+            "required": 1,
+            "filled": true,
+            "slotSatisfied": 0
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": true,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": true,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 3,
+          "compiledCount": 3,
+          "unsupportedCount": 0,
+          "byType": {
+            "nation_id": 1,
+            "team_rating": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "identity_quota": 1,
+            "team_metric": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": 85
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1638,
+      "setId": 553,
+      "challengeName": "79+ Triple Upgrade",
+      "openedAt": "2026-02-13T19:23:36.685Z",
+      "signature": "player_quality|exact|7|[\"gold\"] || player_rarity_group|min|2|[\"rare\"] || players_in_squad|exact|7|[7]",
+      "constraintCount": 3,
+      "constraintTypes": [
+        "player_rarity_group",
+        "player_quality",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "special_or_rarity",
+        "player_tier_or_quality",
+        "squad_size"
+      ],
+      "squadSizeTarget": 7,
+      "teamRatingTarget": null,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 285,
+        "squadSize": 7,
+        "solved": true,
+        "averageRating": 75.86,
+        "adjustedAverage": 76.47,
+        "squadRating": 76,
+        "ratingTarget": null,
+        "timingsMs": {
+          "normalizePlayers": 1,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 2,
+          "total": 3
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_quality",
+            "method": "filter",
+            "required": 7
+          },
+          {
+            "type": "player_rarity_group",
+            "method": "prefill",
+            "required": 2,
+            "filled": true,
+            "slotSatisfied": 0
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": false,
+          "player_quality": true,
+          "player_rarity": false,
+          "player_rarity_group": true,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 3,
+          "compiledCount": 3,
+          "unsupportedCount": 0,
+          "byType": {
+            "player_rarity_group": 1,
+            "player_quality": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "special_or_rarity": 1,
+            "player_tier_or_quality": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 7,
+          "teamRatingTarget": null
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1550,
+      "setId": 525,
+      "challengeName": "Gold Challenge",
+      "openedAt": "2026-02-13T19:24:13.514Z",
+      "signature": "player_quality|exact|11|[\"gold\"] || players_in_squad|exact|11|[11]",
+      "constraintCount": 2,
+      "constraintTypes": [
+        "player_quality",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "player_tier_or_quality",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": null,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 285,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 75,
+        "adjustedAverage": 75,
+        "squadRating": 75,
+        "ratingTarget": null,
+        "timingsMs": {
+          "normalizePlayers": 1,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 3,
+          "total": 4
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_quality",
+            "method": "filter",
+            "required": 11
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": false,
+          "player_quality": true,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 2,
+          "compiledCount": 2,
+          "unsupportedCount": 0,
+          "byType": {
+            "player_quality": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "player_tier_or_quality": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": null
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1564,
+      "setId": 527,
+      "challengeName": "1 of 3 81+ Player Pick",
+      "openedAt": "2026-02-13T19:24:32.713Z",
+      "signature": "player_quality|exact|6|[\"gold\"] || player_rarity_group|min|3|[\"rare\"] || players_in_squad|exact|6|[6]",
+      "constraintCount": 3,
+      "constraintTypes": [
+        "player_rarity_group",
+        "player_quality",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "special_or_rarity",
+        "player_tier_or_quality",
+        "squad_size"
+      ],
+      "squadSizeTarget": 6,
+      "teamRatingTarget": null,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 285,
+        "squadSize": 6,
+        "solved": true,
+        "averageRating": 76.67,
+        "adjustedAverage": 77.5,
+        "squadRating": 77,
+        "ratingTarget": null,
+        "timingsMs": {
+          "normalizePlayers": 0,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 2,
+          "total": 2
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_quality",
+            "method": "filter",
+            "required": 6
+          },
+          {
+            "type": "player_rarity_group",
+            "method": "prefill",
+            "required": 3,
+            "filled": true,
+            "slotSatisfied": 0
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": false,
+          "player_quality": true,
+          "player_rarity": false,
+          "player_rarity_group": true,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 3,
+          "compiledCount": 3,
+          "unsupportedCount": 0,
+          "byType": {
+            "player_rarity_group": 1,
+            "player_quality": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "special_or_rarity": 1,
+            "player_tier_or_quality": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 6,
+          "teamRatingTarget": null
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1578,
+      "setId": 535,
+      "challengeName": "14x 83+ Upgrade",
+      "openedAt": "2026-02-13T19:24:53.263Z",
+      "signature": "player_rarity|min|1|[3] || players_in_squad|exact|11|[11] || team_rating|min|84|[84]",
+      "constraintCount": 3,
+      "constraintTypes": [
+        "player_rarity",
+        "team_rating",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "special_or_rarity",
+        "team_metric",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": 84,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 83.55,
+        "adjustedAverage": 83.98,
+        "squadRating": 84,
+        "ratingTarget": 84,
+        "timingsMs": {
+          "normalizePlayers": 1,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 8,
+          "ratingImprove": 7,
+          "preserve": 7,
+          "total": 23
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_rarity",
+            "method": "prefill",
+            "required": 1,
+            "filled": true,
+            "slotSatisfied": 0
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": true,
+          "player_quality": false,
+          "player_rarity": true,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 3,
+          "compiledCount": 3,
+          "unsupportedCount": 0,
+          "byType": {
+            "player_rarity": 1,
+            "team_rating": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "special_or_rarity": 1,
+            "team_metric": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": 84
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1657,
+      "setId": 562,
+      "challengeName": "Winter Provisions Upgrade",
+      "openedAt": "2026-02-13T19:25:27.146Z",
+      "signature": "player_min_ovr|min|3|[85] || players_in_squad|exact|3|[3]",
+      "constraintCount": 2,
+      "constraintTypes": [
+        "player_min_ovr",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "player_ovr_gate",
+        "squad_size"
+      ],
+      "squadSizeTarget": 3,
+      "teamRatingTarget": null,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 94,
+        "squadSize": 3,
+        "solved": true,
+        "averageRating": 85,
+        "adjustedAverage": 85,
+        "squadRating": 85,
+        "ratingTarget": null,
+        "timingsMs": {
+          "normalizePlayers": 1,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 1,
+          "total": 2
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_min_ovr",
+            "method": "filter",
+            "required": 3
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": false,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": true,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 2,
+          "compiledCount": 2,
+          "unsupportedCount": 0,
+          "byType": {
+            "player_min_ovr": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "player_ovr_gate": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 3,
+          "teamRatingTarget": null
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1149,
+      "setId": 405,
+      "challengeName": "Daily Common Gold Upgrade",
+      "openedAt": "2026-02-13T19:25:36.075Z",
+      "signature": "player_level|min|5|[\"bronze\"] || player_level|min|5|[\"silver\"] || players_in_squad|exact|10|[10]",
+      "constraintCount": 3,
+      "constraintTypes": [
+        "player_level",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "player_tier_or_quality",
+        "squad_size"
+      ],
+      "squadSizeTarget": 10,
+      "teamRatingTarget": null,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 10,
+        "solved": true,
+        "averageRating": 57.1,
+        "adjustedAverage": 61.05,
+        "squadRating": 61,
+        "ratingTarget": null,
+        "timingsMs": {
+          "normalizePlayers": 1,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 6,
+          "total": 7
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_level",
+            "method": "prefill",
+            "required": 5,
+            "filled": true,
+            "slotSatisfied": 0
+          },
+          {
+            "type": "player_level",
+            "method": "prefill",
+            "required": 5,
+            "filled": true,
+            "slotSatisfied": 0
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": false,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": true,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 3,
+          "compiledCount": 3,
+          "unsupportedCount": 0,
+          "byType": {
+            "player_level": 2,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "player_tier_or_quality": 2,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 10,
+          "teamRatingTarget": null
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1148,
+      "setId": 404,
+      "challengeName": "Daily Silver Upgrade",
+      "openedAt": "2026-02-13T19:25:39.783Z",
+      "signature": "player_level|min|1|[\"silver\"] || players_in_squad|exact|1|[1]",
+      "constraintCount": 2,
+      "constraintTypes": [
+        "player_level",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "player_tier_or_quality",
+        "squad_size"
+      ],
+      "squadSizeTarget": 1,
+      "teamRatingTarget": null,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 999,
+        "squadSize": 1,
+        "solved": true,
+        "averageRating": 65,
+        "adjustedAverage": 65,
+        "squadRating": 65,
+        "ratingTarget": null,
+        "timingsMs": {
+          "normalizePlayers": 2,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 1,
+          "total": 3
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_level",
+            "method": "filter",
+            "required": 1
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": false,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": true,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 2,
+          "compiledCount": 2,
+          "unsupportedCount": 0,
+          "byType": {
+            "player_level": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "player_tier_or_quality": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 1,
+          "teamRatingTarget": null
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 18,
+      "setId": 7,
+      "challengeName": "Gold Upgrade",
+      "openedAt": "2026-02-13T19:25:56.897Z",
+      "signature": "player_quality|exact|11|[\"gold\"] || players_in_squad|exact|11|[11]",
+      "constraintCount": 2,
+      "constraintTypes": [
+        "player_quality",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "player_tier_or_quality",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": null,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 285,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 75,
+        "adjustedAverage": 75,
+        "squadRating": 75,
+        "ratingTarget": null,
+        "timingsMs": {
+          "normalizePlayers": 1,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 1,
+          "total": 2
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_quality",
+            "method": "filter",
+            "required": 11
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": false,
+          "player_quality": true,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 2,
+          "compiledCount": 2,
+          "unsupportedCount": 0,
+          "byType": {
+            "player_quality": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "player_tier_or_quality": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": null
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1150,
+      "setId": 406,
+      "challengeName": "Daily Rare Gold Upgrade",
+      "openedAt": "2026-02-13T19:26:08.620Z",
+      "signature": "player_level|min|5|[\"gold\"] || players_in_squad|exact|5|[5]",
+      "constraintCount": 2,
+      "constraintTypes": [
+        "player_level",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "player_tier_or_quality",
+        "squad_size"
+      ],
+      "squadSizeTarget": 5,
+      "teamRatingTarget": null,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 285,
+        "squadSize": 5,
+        "solved": true,
+        "averageRating": 75,
+        "adjustedAverage": 75,
+        "squadRating": 75,
+        "ratingTarget": null,
+        "timingsMs": {
+          "normalizePlayers": 1,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 2,
+          "total": 3
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_level",
+            "method": "filter",
+            "required": 5
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": false,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": true,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 2,
+          "compiledCount": 2,
+          "unsupportedCount": 0,
+          "byType": {
+            "player_level": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "player_tier_or_quality": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 5,
+          "teamRatingTarget": null
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 17,
+      "setId": 6,
+      "challengeName": "Silver Upgrade",
+      "openedAt": "2026-02-13T19:26:29.989Z",
+      "signature": "player_quality|exact|11|[\"silver\"] || players_in_squad|exact|11|[11]",
+      "constraintCount": 2,
+      "constraintTypes": [
+        "player_quality",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "player_tier_or_quality",
+        "squad_size"
+      ],
+      "squadSizeTarget": 11,
+      "teamRatingTarget": null,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 999,
+        "squadSize": 11,
+        "solved": true,
+        "averageRating": 65.09,
+        "adjustedAverage": 65.17,
+        "squadRating": 65,
+        "ratingTarget": null,
+        "timingsMs": {
+          "normalizePlayers": 1,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 1,
+          "total": 2
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_quality",
+            "method": "filter",
+            "required": 11
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": false,
+          "player_quality": true,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": false,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 2,
+          "compiledCount": 2,
+          "unsupportedCount": 0,
+          "byType": {
+            "player_quality": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "player_tier_or_quality": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 11,
+          "teamRatingTarget": null
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1148,
+      "setId": 404,
+      "challengeName": "Daily Silver Upgrade",
+      "openedAt": "2026-02-13T19:26:59.441Z",
+      "signature": "player_level|min|1|[\"silver\"] || players_in_squad|exact|1|[1]",
+      "constraintCount": 2,
+      "constraintTypes": [
+        "player_level",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "player_tier_or_quality",
+        "squad_size"
+      ],
+      "squadSizeTarget": 1,
+      "teamRatingTarget": null,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 999,
+        "squadSize": 1,
+        "solved": true,
+        "averageRating": 65,
+        "adjustedAverage": 65,
+        "squadRating": 65,
+        "ratingTarget": null,
+        "timingsMs": {
+          "normalizePlayers": 0,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 1,
+          "total": 1
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_level",
+            "method": "filter",
+            "required": 1
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": false,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": true,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 2,
+          "compiledCount": 2,
+          "unsupportedCount": 0,
+          "byType": {
+            "player_level": 1,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "player_tier_or_quality": 1,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 1,
+          "teamRatingTarget": null
+        }
+      },
+      "evoUsedCount": 0
+    },
+    {
+      "challengeId": 1149,
+      "setId": 405,
+      "challengeName": "Daily Common Gold Upgrade",
+      "openedAt": "2026-02-13T19:27:11.184Z",
+      "signature": "player_level|min|5|[\"bronze\"] || player_level|min|5|[\"silver\"] || players_in_squad|exact|10|[10]",
+      "constraintCount": 3,
+      "constraintTypes": [
+        "player_level",
+        "players_in_squad"
+      ],
+      "constraintCategories": [
+        "player_tier_or_quality",
+        "squad_size"
+      ],
+      "squadSizeTarget": 10,
+      "teamRatingTarget": null,
+      "solved": true,
+      "failingTypes": [],
+      "failingLabels": [],
+      "solveStats": {
+        "solverVersion": "debug-3",
+        "playerCount": 2025,
+        "filteredPlayerCount": 2025,
+        "squadSize": 10,
+        "solved": true,
+        "averageRating": 57.1,
+        "adjustedAverage": 61.05,
+        "squadRating": 61,
+        "ratingTarget": null,
+        "timingsMs": {
+          "normalizePlayers": 0,
+          "compileConstraints": 0,
+          "normalizeRules": 0,
+          "buildSquad": 4,
+          "total": 4
+        },
+        "chemistryTargets": null,
+        "chemistry": null,
+        "appliedFilters": [
+          {
+            "type": "player_level",
+            "method": "prefill",
+            "required": 5,
+            "filled": true,
+            "slotSatisfied": 0
+          },
+          {
+            "type": "player_level",
+            "method": "prefill",
+            "required": 5,
+            "filled": true,
+            "slotSatisfied": 0
+          }
+        ],
+        "debugEnabled": false,
+        "debugLog": [],
+        "debugSquad": null,
+        "ignoredRequirementCount": 0,
+        "requirementFlags": {
+          "players_in_squad": true,
+          "team_rating": false,
+          "player_quality": false,
+          "player_rarity": false,
+          "player_rarity_group": false,
+          "nation_id": false,
+          "league_id": false,
+          "club_id": false,
+          "nation_count": false,
+          "league_count": false,
+          "club_count": false,
+          "same_nation_count": false,
+          "same_league_count": false,
+          "same_club_count": false,
+          "first_owner_players_count": false,
+          "player_tradability": false,
+          "player_exact_ovr": false,
+          "player_min_ovr": false,
+          "player_max_ovr": false,
+          "player_inform": false,
+          "loan_players": false,
+          "player_level": true,
+          "legend_count": false,
+          "num_trophy_required": false,
+          "chemistry_points": false,
+          "all_players_chemistry_points": false
+        },
+        "constraintSummary": {
+          "ruleCount": 3,
+          "compiledCount": 3,
+          "unsupportedCount": 0,
+          "byType": {
+            "player_level": 2,
+            "players_in_squad": 1
+          },
+          "byCategory": {
+            "player_tier_or_quality": 2,
+            "squad_size": 1
+          },
+          "squadSizeTarget": 10,
+          "teamRatingTarget": null
+        }
+      },
+      "evoUsedCount": 0
+    }
+  ]
+}

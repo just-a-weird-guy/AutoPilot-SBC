@@ -16,15 +16,27 @@ data/*
 !scripts/
 scripts/*
 !scripts/changelog-entry.js
+!scripts/compile-futbin-marquee.mjs
+!scripts/merge-sbc-datasets.mjs
+!scripts/replay-recorded-challenges.mjs
 !scripts/replay-sequence-failure-runtime.mjs
+!scripts/replay-answer-the-call-overfill.mjs
+!scripts/replay-futbin-formation-slots.mjs
 !scripts/replay-sequence-hub-entry-reinjection.mjs
 !scripts/replay-sequence-stale-rematch.mjs
 !scripts/replay-totw-matrix.mjs
+!tampermonkey/
+tampermonkey/*
+!tampermonkey/futbin-marquee-export.user.js
+!data/futbin-challenges-sample-raw.json
 
 # Local planning / scratch notes
 findings.md
 progress.md
 task_plan.md
+
+# Local replay reports
+replay-report-*.json
 
 backup-project.ps1
 AGENT.md
