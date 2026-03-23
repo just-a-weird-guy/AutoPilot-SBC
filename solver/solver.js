@@ -15,6 +15,7 @@ const REQUIREMENT_KEYS = [
   "player_quality",
   "player_rarity",
   "player_rarity_group",
+  "player_rarity_or_totw",
   "nation_id",
   "league_id",
   "club_id",
@@ -54,6 +55,7 @@ const TYPE_ALIASES = {
   player_quality: "player_quality",
   player_rarity: "player_rarity",
   player_rarity_group: "player_rarity_group",
+  player_rarity_or_totw: "player_rarity_or_totw",
   nation_id: "nation_id",
   league_id: "league_id",
   club_id: "club_id",
@@ -113,14 +115,15 @@ const FILTER_PRIORITY = [
   "player_level",
   "player_quality",
   "player_inform",
-  "player_rarity",
-  "player_rarity_group",
   "nation_id",
   "league_id",
   "club_id",
   "same_nation_count",
   "same_league_count",
   "same_club_count",
+  "player_rarity",
+  "player_rarity_group",
+  "player_rarity_or_totw",
   "first_owner_players_count",
   "player_tradability",
   "player_exact_ovr",
@@ -811,11 +814,20 @@ const buildPredicate = (rule) => {
     if (!normalized.length) return null;
     return (player) => normalized.includes(player.quality);
   }
-  if (type === "player_rarity" || type === "player_rarity_group") {
+  if (
+    type === "player_rarity" ||
+    type === "player_rarity_group" ||
+    type === "player_rarity_or_totw"
+  ) {
     const numericValues = values.map(toNumber).filter((v) => v != null);
     const textValues = values.map(normalizeString).filter(Boolean);
     const hint = getRarityHint(rule);
     return (player) => {
+      if (type === "player_rarity_or_totw") {
+        const name = normalizeString(player.rarityName);
+        const rareMatch = !player.isSpecial && ((player.rarityId != null ? player.rarityId >= 1 : false) || (name ? name.includes("rare") : false));
+        return rareMatch || isTotwPlayer(player);
+      }
       const name = normalizeString(player.rarityName);
       const numericMatch =
         numericValues.length && player.rarityId != null
@@ -982,6 +994,41 @@ const selectGroupForSameCount = (players, attr, required) => {
   return bestGroup;
 };
 
+const PREFILL_PREFERENCE_TYPES = new Set([
+  "nation_id",
+  "league_id",
+  "club_id",
+  "player_level",
+  "player_quality",
+  "player_rarity",
+  "player_rarity_group",
+  "player_tradability",
+  "first_owner_players_count",
+  "player_exact_ovr",
+  "player_inform",
+]);
+
+const buildPrefillPreferencePredicates = (rules, squad, squadSize) => {
+  const preferences = [];
+  for (const rule of rules || []) {
+    if (!rule || !PREFILL_PREFERENCE_TYPES.has(rule.type)) continue;
+    if (rule.op !== "min" && rule.op !== "exact") continue;
+    const required = getRuleCount(rule, squadSize);
+    if (required == null || required <= 0) continue;
+    const predicate = rule.predicate || buildPredicate(rule);
+    if (typeof predicate !== "function") continue;
+    const current = countMatching(squad, predicate);
+    const deficit = required - current;
+    if (deficit <= 0) continue;
+    preferences.push({
+      type: rule.type,
+      predicate,
+      weight: deficit,
+    });
+  }
+  return preferences;
+};
+
 const prefillPlayers = (
   squad,
   pool,
@@ -991,9 +1038,27 @@ const prefillPlayers = (
   options = {},
 ) => {
   if (!predicate || required == null || required <= 0) return false;
+  const squadSizeCap = toNumber(options?.squadSizeCap);
+  const ratingHintPivot = toNumber(options?.ratingHint?.pivot);
+  const useRatingHint =
+    ratingHintPivot != null && Number.isFinite(ratingHintPivot);
+  const preferencePredicates = Array.isArray(options?.preferencePredicates)
+    ? options.preferencePredicates.filter(
+        (entry) => entry && typeof entry.predicate === "function",
+      )
+    : [];
+  const remainingCapacity =
+    squadSizeCap != null && Array.isArray(squad)
+      ? Math.max(0, squadSizeCap - squad.length)
+      : null;
+  if (remainingCapacity != null && remainingCapacity <= 0) return false;
   const current = countMatching(squad, predicate);
   let needed = required - current;
   if (needed <= 0) return true;
+  if (remainingCapacity != null) {
+    needed = Math.min(needed, remainingCapacity);
+    if (needed <= 0) return true;
+  }
 
   const uniqueMaxByAttr = options?.uniqueMaxByAttr;
   const sameMaxByAttr = options?.sameMaxByAttr;
@@ -1083,20 +1148,47 @@ const prefillPlayers = (
     return { ok: true, penalty };
   };
 
+  const getPreferenceScore = (candidate) => {
+    let score = 0;
+    for (const entry of preferencePredicates) {
+      if (entry.predicate(candidate)) {
+        score += Math.max(1, toNumber(entry.weight) ?? 1);
+      }
+    }
+    return score;
+  };
+
   while (needed > 0) {
+    if (remainingCapacity != null && squad.length >= squadSizeCap) break;
     let best = null;
     for (const candidate of candidates) {
       if (!candidate || candidate.id == null) continue;
       if (lockedIds.has(candidate.id)) continue;
       const check = canAddCandidate(candidate);
       if (!check.ok) continue;
+      const preferenceScore = getPreferenceScore(candidate);
+      const distance = useRatingHint
+        ? Math.abs((toNumber(candidate?.rating) ?? 0) - ratingHintPivot)
+        : null;
       if (
         !best ||
         check.penalty < best.penalty ||
         (check.penalty === best.penalty &&
-          candidate.rating < best.player.rating)
+          preferenceScore > best.preferenceScore) ||
+        (check.penalty === best.penalty &&
+          preferenceScore === best.preferenceScore &&
+          (useRatingHint
+            ? distance < best.distance ||
+              (distance === best.distance &&
+                candidate.rating < best.player.rating)
+            : candidate.rating < best.player.rating))
       ) {
-        best = { player: candidate, penalty: check.penalty };
+        best = {
+          player: candidate,
+          penalty: check.penalty,
+          preferenceScore,
+          distance: distance ?? 0,
+        };
       }
     }
     if (!best) break;
@@ -1124,8 +1216,18 @@ const prefillPlayers = (
       .filter((player) => player && player.id != null)
       .filter((player) => !lockedIds.has(player.id))
       .filter(predicate)
-      .sort((a, b) => a.rating - b.rating);
+      .sort((a, b) => {
+        const preferenceDiff = getPreferenceScore(b) - getPreferenceScore(a);
+        if (preferenceDiff !== 0) return preferenceDiff;
+        if (useRatingHint) {
+          const aDistance = Math.abs((toNumber(a?.rating) ?? 0) - ratingHintPivot);
+          const bDistance = Math.abs((toNumber(b?.rating) ?? 0) - ratingHintPivot);
+          if (aDistance !== bDistance) return aDistance - bDistance;
+        }
+        return a.rating - b.rating;
+      });
     for (const candidate of fallback) {
+      if (remainingCapacity != null && squad.length >= squadSizeCap) break;
       if (needed <= 0) break;
       if (!candidate || candidate.id == null) continue;
       if (lockedIds.has(candidate.id)) continue;
@@ -1146,6 +1248,17 @@ const prefillPlayers = (
   }
 
   return needed <= 0;
+};
+
+const rebuildLockedIdsFromSquad = (squad, lockedIds) => {
+  if (!(lockedIds instanceof Set)) return new Set();
+  lockedIds.clear();
+  for (const player of Array.isArray(squad) ? squad : []) {
+    const id = player?.id ?? null;
+    if (id == null) continue;
+    lockedIds.add(id);
+  }
+  return lockedIds;
 };
 
 const applyMinMaxFilters = (pool, rules) => {
@@ -2723,6 +2836,7 @@ const evaluateRule = (rule, squad, squadSize, evalCtx) => {
     rule.type === "player_quality" ||
     rule.type === "player_rarity" ||
     rule.type === "player_rarity_group" ||
+    rule.type === "player_rarity_or_totw" ||
     rule.type === "player_tradability" ||
     rule.type === "first_owner_players_count" ||
     rule.type === "player_exact_ovr" ||
@@ -3832,6 +3946,12 @@ export const solveSquad = (context) => {
     rulesByType.get(rule.type).push(rule);
   }
 
+  const prefillPreferencePredicates = buildPrefillPreferencePredicates(
+    rules,
+    squad,
+    squadSize,
+  );
+
   // Enforce "Players from the same X: Max N" during prefill/fill so we don't build an invalid squad
   // and only discover it at final evaluation.
   const sameMaxByAttr = new Map();
@@ -4036,6 +4156,9 @@ export const solveSquad = (context) => {
             uniqueMaxByAttr,
             sameMaxByAttr,
             predicateCaps,
+            squadSizeCap: squadSize,
+            ratingHint: ratingFillHint,
+            preferencePredicates: prefillPreferencePredicates,
           },
         );
         appliedFilters.push({
@@ -4094,6 +4217,9 @@ export const solveSquad = (context) => {
           uniqueMaxByAttr,
           sameMaxByAttr,
           predicateCaps,
+          squadSizeCap: squadSize,
+          ratingHint: ratingFillHint,
+          preferencePredicates: prefillPreferencePredicates,
         },
       );
       appliedFilters.push({
@@ -4183,6 +4309,7 @@ export const solveSquad = (context) => {
     predicateCaps,
     ratingHint: ratingFillHint,
   });
+  rebuildLockedIdsFromSquad(squad, lockedIds);
   debugPush?.({
     stage: "fill",
     squadSize: squad.length,
