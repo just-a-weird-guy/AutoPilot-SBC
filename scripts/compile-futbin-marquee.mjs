@@ -446,18 +446,15 @@ const parseRequirementRow = (row, registry) => {
   if (/^rare or totw:/i.test(label)) {
     return {
       rules: [
-        {
-          ...baseRule({
-            type: "player_rarity_or_totw",
-            op: comparator,
-            count: numeric ?? -1,
-            value: ["rare", "totw"],
-            label,
-            scopeName: comparator === "max" ? "LOWER" : comparator === "exact" ? "EXACT" : "GREATER",
-            source: "futbin-text-combined",
-          }),
-          combinedPredicate: "rare_or_totw",
-        },
+        baseRule({
+          type: "player_rarity_group",
+          op: comparator,
+          count: numeric ?? -1,
+          value: ["rare"],
+          label,
+          scopeName: comparator === "max" ? "LOWER" : comparator === "exact" ? "EXACT" : "GREATER",
+          source: "futbin-text-rare-compat",
+        }),
       ],
       unresolved: null,
     };

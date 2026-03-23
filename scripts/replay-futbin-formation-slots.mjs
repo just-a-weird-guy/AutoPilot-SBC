@@ -74,6 +74,23 @@ assert.equal(compiledRecord.formationName, "3-5-2");
 assert.equal(compiledRecord.formationCode, "352");
 assert.equal(compiledRecord.slotSource, "challenge-react-data");
 assert.equal(compiledRecord.squadSlots?.length, 11);
+assert.deepEqual(
+  compiledRecord.requirementsNormalized
+    .filter((rule) =>
+      String(rule?.label || "").toLowerCase().includes("rare or totw"),
+    )
+    .map((rule) => ({
+      type: rule?.type ?? null,
+      value: rule?.value ?? null,
+    })),
+  [
+    {
+      type: "player_rarity_group",
+      value: ["rare"],
+    },
+  ],
+  "Futbin 'Rare or TOTW' should compile to the same rare-group rule used by the live extension",
+);
 
 const result = solveSquad(
   buildSolverContext({
