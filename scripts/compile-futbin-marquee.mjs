@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const usage = `
 Compile a Futbin challenge raw export into replay-compatible normalized records.
@@ -262,6 +263,144 @@ const parseEntityIdsFromImages = (images, entityType) => {
   );
 };
 
+const EA_KEY_BY_TYPE = Object.freeze({
+  team_rating: { key: 19, keyName: "TEAM_RATING" },
+  player_quality: { key: 3, keyName: "PLAYER_QUALITY" },
+  player_rarity: { key: 18, keyName: "PLAYER_RARITY" },
+  player_rarity_group: { key: 25, keyName: "PLAYER_RARITY_GROUP" },
+  nation_id: { key: 10, keyName: "NATION_ID" },
+  league_id: { key: 11, keyName: "LEAGUE_ID" },
+  club_id: { key: 12, keyName: "CLUB_ID" },
+  nation_count: { key: 7, keyName: "NATION_COUNT" },
+  league_count: { key: 8, keyName: "LEAGUE_COUNT" },
+  club_count: { key: 9, keyName: "CLUB_COUNT" },
+  same_nation_count: { key: 4, keyName: "SAME_NATION_COUNT" },
+  same_league_count: { key: 5, keyName: "SAME_LEAGUE_COUNT" },
+  same_club_count: { key: 6, keyName: "SAME_CLUB_COUNT" },
+  first_owner_players_count: { key: 30, keyName: "FIRST_OWNER_PLAYERS_COUNT" },
+  player_tradability: { key: 33, keyName: "PLAYER_TRADABILITY" },
+  player_exact_ovr: { key: 27, keyName: "PLAYER_EXACT_OVR" },
+  player_min_ovr: { key: 26, keyName: "PLAYER_MIN_OVR" },
+  player_max_ovr: { key: 28, keyName: "PLAYER_MAX_OVR" },
+  player_level: { key: 17, keyName: "PLAYER_LEVEL" },
+  legend_count: { key: 15, keyName: "LEGEND_COUNT" },
+  num_trophy_required: { key: 16, keyName: "NUM_TROPHY_REQUIRED" },
+  chemistry_points: { key: 35, keyName: "CHEMISTRY_POINTS" },
+  all_players_chemistry_points: {
+    key: 36,
+    keyName: "ALL_PLAYERS_CHEMISTRY_POINTS",
+  },
+  players_in_squad: { key: -1, keyName: "PLAYERS_IN_SQUAD" },
+});
+
+const EA_SCOPE_BY_OP = Object.freeze({
+  min: 0,
+  max: 1,
+  exact: 2,
+});
+
+const EA_VALUE_BY_TYPE = Object.freeze({
+  player_level: {
+    bronze: 1,
+    silver: 2,
+    gold: 3,
+  },
+  player_quality: {
+    bronze: 1,
+    silver: 2,
+    gold: 3,
+  },
+  player_rarity_group: {
+    rare: 4,
+  },
+});
+
+const INFERRED_MAPPING_TYPES = new Set(["player_level"]);
+
+const toArray = (value) => {
+  if (Array.isArray(value)) return value;
+  if (value == null) return [];
+  return [value];
+};
+
+const mapRuleValueToEa = (rule) => {
+  const values = toArray(rule?.value);
+  const type = rule?.type ?? null;
+  const categoricalMap = type ? EA_VALUE_BY_TYPE[type] : null;
+  const mapped = values.map((value) => {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (!categoricalMap) return value;
+    const key = normalizeString(value);
+    return key && Object.hasOwn(categoricalMap, key) ? categoricalMap[key] : value;
+  });
+
+  if (!mapped.length) return null;
+  return mapped.length === 1 ? mapped[0] : mapped;
+};
+
+const buildSyntheticEaRuleMetadata = (rule) => {
+  const mapping = EA_KEY_BY_TYPE[rule?.type] || null;
+  const scope = Object.hasOwn(EA_SCOPE_BY_OP, rule?.op) ? EA_SCOPE_BY_OP[rule.op] : null;
+  const eaValue = mapRuleValueToEa(rule);
+  const isSynthetic = Boolean(mapping) || scope != null || eaValue != null;
+  if (!isSynthetic) return null;
+  return {
+    key: mapping?.key ?? null,
+    keyName: mapping?.keyName ?? null,
+    scope,
+    eaValue,
+    enumMappingSource: INFERRED_MAPPING_TYPES.has(rule?.type)
+      ? "verified-webapp-with-inferred-tier-order"
+      : "verified-webapp",
+  };
+};
+
+const buildRequirementsRawEntry = (rule) => {
+  const metadata = buildSyntheticEaRuleMetadata(rule);
+  const key = metadata?.key ?? null;
+  const scope = metadata?.scope ?? null;
+  const eaValue = metadata?.eaValue;
+  const values = toArray(eaValue);
+  return {
+    scope,
+    count: rule?.count ?? null,
+    isCombinedRequirement: false,
+    label: rule?.label ?? null,
+    kvPairs:
+      key == null || !values.length
+        ? {}
+        : {
+            [String(key)]: values,
+          },
+  };
+};
+
+const buildAutosbcRequirement = (rule) => {
+  const metadata = buildSyntheticEaRuleMetadata(rule);
+  if (!metadata?.keyName || metadata.scope == null) return null;
+  if (rule?.type === "players_in_squad") return null;
+  return {
+    key: metadata.key,
+    keyName: metadata.keyName,
+    value: metadata.eaValue,
+    count: typeof rule?.count === "number" && rule.count > 0 ? rule.count : 0,
+    scope: metadata.scope,
+  };
+};
+
+const enrichNormalizedRule = (rule) => {
+  const metadata = buildSyntheticEaRuleMetadata(rule);
+  if (!metadata) return rule;
+  return {
+    ...rule,
+    key: metadata.key,
+    keyName: metadata.keyName,
+    scope: metadata.scope,
+    eaValue: metadata.eaValue,
+    enumMappingSource: metadata.enumMappingSource,
+  };
+};
+
 const baseRule = ({
   type,
   op,
@@ -503,7 +642,7 @@ const compileRawGroup = (group, registry) => {
     const parsedRows = ensureArray(challenge?.requirementsDetailed).map((row) =>
       parseRequirementRow(row, registry),
     );
-    const requirements = parsedRows.flatMap((entry) => entry.rules);
+    const requirements = parsedRows.flatMap((entry) => entry.rules).map(enrichNormalizedRule);
     const unresolvedRequirements = parsedRows
       .map((entry) => entry.unresolved)
       .filter(Boolean);
@@ -535,15 +674,18 @@ const compileRawGroup = (group, registry) => {
         }))
         .filter((slot) => slot.positionName),
       requirementsText: ensureArray(challenge?.requirementsText),
-      requirementsRaw: [],
+      requirementsRaw: requirements.map(buildRequirementsRawEntry),
       requirements: requirements.map((rule) => ({
         scope: rule.scope ?? null,
         count: rule.count ?? null,
         isCombined: Boolean(rule.combinedPredicate),
         label: rule.label ?? null,
-        kvPairs: [],
+        kvPairs: rule?.key != null ? [{ key: rule.key }] : [],
       })),
       requirementsNormalized: requirements,
+      autosbcRequirements: requirements
+        .map(buildAutosbcRequirement)
+        .filter(Boolean),
       unresolvedRequirements,
       challengeUrl: challenge?.challengeUrl ?? null,
       groupUrl: group?.groupUrl ?? null,
@@ -553,25 +695,19 @@ const compileRawGroup = (group, registry) => {
   return challenges;
 };
 
-const run = async () => {
-  const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    console.log(usage.trim());
-    return;
-  }
-  if (!args.input) throw new Error("Missing --input <file>");
-
-  const inputPath = path.resolve(args.input);
-  const raw = await readJson(inputPath);
+export const buildFutbinCompileReport = ({
+  raw,
+  inputPath = null,
+  playersJson = null,
+  aliasesJson = null,
+} = {}) => {
   const sourceLabel = inferSourceLabel(inputPath, raw?.queryUrl);
 
   let registry = makeRegistry();
-  if (args.players) {
-    const playersJson = await readJson(path.resolve(args.players));
+  if (playersJson) {
     registry = buildRegistryFromPlayers(extractPlayers(playersJson));
   }
-  if (args.aliases) {
-    const aliasesJson = await readJson(path.resolve(args.aliases));
+  if (aliasesJson) {
     registry = mergeAliasRegistry(registry, aliasesJson);
   }
 
@@ -582,7 +718,7 @@ const run = async () => {
     0,
   );
 
-  const report = {
+  return {
     exportedAt: new Date().toISOString(),
     recorderVersion: "futbin-compiled-0.2.0",
     source: "futbin",
@@ -599,6 +735,33 @@ const run = async () => {
     },
     records,
   };
+};
+
+const run = async () => {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    console.log(usage.trim());
+    return;
+  }
+  if (!args.input) throw new Error("Missing --input <file>");
+
+  const inputPath = path.resolve(args.input);
+  const raw = await readJson(inputPath);
+  let playersJson = null;
+  if (args.players) {
+    playersJson = await readJson(path.resolve(args.players));
+  }
+  let aliasesJson = null;
+  if (args.aliases) {
+    aliasesJson = await readJson(path.resolve(args.aliases));
+  }
+
+  const report = buildFutbinCompileReport({
+    raw,
+    inputPath,
+    playersJson,
+    aliasesJson,
+  });
 
   const outputPath = args.output
     ? path.resolve(args.output)
@@ -611,7 +774,13 @@ const run = async () => {
   );
 };
 
-run().catch((error) => {
-  console.error("[Futbin Compile] Failed:", error?.message || error);
-  process.exitCode = 1;
-});
+const isMainModule = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isMainModule) {
+  run().catch((error) => {
+    console.error("[Futbin Compile] Failed:", error?.message || error);
+    process.exitCode = 1;
+  });
+}

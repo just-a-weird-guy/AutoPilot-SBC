@@ -180,6 +180,29 @@
     };
   };
 
+  async function hydrateSavedGlobalExclusions(settings = null) {
+    const normalized = normalizeSolverSettingsInput(
+      settings,
+      getDefaultSolverSettings(),
+    );
+    let excludedLeagueIds = normalized.excludedLeagueIds;
+    let excludedNationIds = normalized.excludedNationIds;
+    try {
+      excludedLeagueIds = await getGlobalExcludedLeagueIds();
+    } catch {}
+    try {
+      excludedNationIds = await getGlobalExcludedNationIds();
+    } catch {}
+    return normalizeSolverSettingsInput(
+      {
+        ...normalized,
+        excludedLeagueIds,
+        excludedNationIds,
+      },
+      getDefaultSolverSettings(),
+    );
+  }
+
   const normalizeSetId = (value) => {
     if (value == null) return null;
     const text = String(value).trim();
@@ -5706,7 +5729,21 @@
 .ea-data-sequence-range-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 10px;
+}
+.ea-data-sequence-range-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ea-data-sequence-range-wrap .ea-data-range {
+  margin-top: 2px;
+}
+.ea-data-sequence-range-row .ea-data-range__field {
+  gap: 5px;
+}
+.ea-data-sequence-range-row .ea-data-range__number {
+  text-align: center;
 }
 
 /* -- Custom Checkboxes / Toggle Grid -- */
@@ -6632,9 +6669,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid rgba(11, 150, 255, 0.42);
-  background: rgba(11, 150, 255, 0.12);
-  color: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(255, 106, 106, 0.34);
+  background: rgba(120, 22, 22, 0.18);
+  color: rgba(255, 214, 214, 0.96);
   border-radius: 999px;
   padding: 3px 8px;
   font-size: 11px;
@@ -6672,8 +6709,8 @@
   cursor: pointer;
 }
 .ea-data-excluded-leagues-option[data-selected="true"] {
-  border-color: rgba(11, 150, 255, 0.7);
-  background: rgba(11, 150, 255, 0.14);
+  border-color: rgba(255, 106, 106, 0.48);
+  background: rgba(120, 22, 22, 0.22);
 }
 .ea-data-excluded-leagues-option-main {
   min-width: 0;
@@ -6696,7 +6733,7 @@
 .ea-data-excluded-leagues-option-check {
   font-size: 12px;
   font-weight: 800;
-  color: rgba(11, 150, 255, 0.95);
+  color: rgba(255, 132, 132, 0.96);
   min-width: 18px;
   text-align: right;
 }
@@ -6782,11 +6819,20 @@
   font-size: 11px;
   font-weight: 600;
 }
+.ea-data-exclusion-count-badge,
 .ea-data-local-exclusions__count-badge {
   font-size: 11px;
   font-weight: 700;
-  color: rgba(255, 130, 130, 0.85);
+  color: rgba(200, 200, 210, 0.42);
   margin-left: auto;
+}
+.ea-data-exclusion-count-badge:empty,
+.ea-data-local-exclusions__count-badge:empty {
+  display: none;
+}
+.ea-data-exclusion-count-badge[data-state="active"],
+.ea-data-local-exclusions__count-badge[data-state="active"] {
+  color: rgba(255, 122, 122, 0.94);
 }
 .ea-data-local-exclusions__selected-wrap {
   margin-bottom: 8px;
@@ -9028,7 +9074,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       settings = getDefaultSolverSettings();
     }
     try {
-      globalSettings = await getSolverSettingsForChallenge(null);
+      globalSettings = await hydrateSavedGlobalExclusions(
+        await getSolverSettingsForChallenge(null),
+      );
     } catch {
       globalSettings = getDefaultSolverSettings();
     }
@@ -9723,15 +9771,33 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const countEl = section.querySelector("[data-local-kind-count]");
       const localBlockedCount = current.extraExcludedIds.length;
       const reEnabledCount = current.allowedGlobalIds.length;
+      const effectiveExcludedCount = current.effectiveExcludedIds.length;
       if (countEl) {
-        const parts = [];
+        const tooltipParts = [];
+        if (effectiveExcludedCount > 0) {
+          tooltipParts.push(
+            `${effectiveExcludedCount} excluded in this setup`,
+          );
+        }
         if (localBlockedCount > 0) {
-          parts.push(`${localBlockedCount} blocked`);
+          tooltipParts.push(`${localBlockedCount} blocked here`);
         }
         if (reEnabledCount > 0) {
-          parts.push(`${reEnabledCount} re-enabled`);
+          tooltipParts.push(`${reEnabledCount} re-enabled`);
         }
-        countEl.textContent = parts.join(" \u00b7 ");
+        countEl.textContent =
+          effectiveExcludedCount > 0
+            ? `${effectiveExcludedCount} excluded`
+            : "";
+        countEl.setAttribute(
+          "data-state",
+          effectiveExcludedCount > 0 ? "active" : "idle",
+        );
+        if (tooltipParts.length) {
+          countEl.setAttribute("title", tooltipParts.join(" \u00b7 "));
+        } else {
+          countEl.removeAttribute("title");
+        }
       }
       if (button) {
         button.setAttribute(
@@ -9997,6 +10063,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       <div class="ea-data-collapsible-section">
         <button type="button" class="ea-data-collapsible-heading" id="ea-data-app-settings-excluded-leagues-toggle" data-action="toggle-excluded-leagues" aria-expanded="false" aria-controls="ea-data-app-settings-excluded-leagues-panel">
           <span>Excluded Leagues</span>
+          <span class="ea-data-exclusion-count-badge" id="ea-data-app-settings-excluded-league-heading-count" data-state="idle"></span>
           <span class="ea-data-collapsible-chevron" aria-hidden="true">&#9662;</span>
         </button>
         <div class="ea-data-excluded-leagues-wrap" id="ea-data-app-settings-excluded-leagues-panel" aria-hidden="true" hidden>
@@ -10024,6 +10091,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       <div class="ea-data-collapsible-section">
         <button type="button" class="ea-data-collapsible-heading" id="ea-data-app-settings-excluded-nations-toggle" data-action="toggle-excluded-nations" aria-expanded="false" aria-controls="ea-data-app-settings-excluded-nations-panel">
           <span>Excluded Nations</span>
+          <span class="ea-data-exclusion-count-badge" id="ea-data-app-settings-excluded-nation-heading-count" data-state="idle"></span>
           <span class="ea-data-collapsible-chevron" aria-hidden="true">&#9662;</span>
         </button>
         <div class="ea-data-excluded-leagues-wrap" id="ea-data-app-settings-excluded-nations-panel" aria-hidden="true" hidden>
@@ -10084,6 +10152,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     const excludedLeagueCountEl = section.querySelector(
       "#ea-data-app-settings-excluded-league-count",
     );
+    const excludedLeagueHeadingCountEl = section.querySelector(
+      "#ea-data-app-settings-excluded-league-heading-count",
+    );
     const excludedLeagueSearchInput = section.querySelector(
       "#ea-data-app-settings-excluded-leagues-search",
     );
@@ -10104,6 +10175,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     );
     const excludedNationCountEl = section.querySelector(
       "#ea-data-app-settings-excluded-nation-count",
+    );
+    const excludedNationHeadingCountEl = section.querySelector(
+      "#ea-data-app-settings-excluded-nation-heading-count",
     );
     const excludedNationSearchInput = section.querySelector(
       "#ea-data-app-settings-excluded-nations-search",
@@ -10141,6 +10215,27 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     let excludedNationOptions = [];
     let excludedNationOptionsHydrated = false;
     let excludedNationHydrateToken = 0;
+
+    const syncExclusionHeadingBadge = (badgeEl, count, noun) => {
+      if (!badgeEl) return;
+      const normalizedCount = Math.max(0, Math.floor(readNumeric(count) ?? 0));
+      badgeEl.textContent =
+        normalizedCount > 0 ? `${normalizedCount} excluded` : "";
+      badgeEl.setAttribute(
+        "data-state",
+        normalizedCount > 0 ? "active" : "idle",
+      );
+      if (normalizedCount > 0) {
+        const nounLabel =
+          normalizedCount === 1 ? noun : `${noun}s`;
+        badgeEl.setAttribute(
+          "title",
+          `${normalizedCount} ${nounLabel} currently excluded`,
+        );
+      } else {
+        badgeEl.removeAttribute("title");
+      }
+    };
 
     const on = (target, type, fn) => {
       if (!target || typeof target.addEventListener !== "function") return;
@@ -10287,6 +10382,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       try {
         excludedLeagueCountEl.textContent = `${count} excluded`;
       } catch {}
+      syncExclusionHeadingBadge(
+        excludedLeagueHeadingCountEl,
+        count,
+        "league",
+      );
       try {
         clearExcludedLeaguesBtn.disabled =
           excludedLeagueActionInFlight || count === 0;
@@ -10442,6 +10542,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       try {
         excludedNationCountEl.textContent = `${count} excluded`;
       } catch {}
+      syncExclusionHeadingBadge(
+        excludedNationHeadingCountEl,
+        count,
+        "nation",
+      );
       try {
         clearExcludedNationsBtn.disabled =
           excludedNationActionInFlight || count === 0;
@@ -12406,7 +12511,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         settings,
         getDefaultSolverSettings(),
       );
-      const localSettings = normalizeLocalExclusionSettings(normalizedSettings);
+      const localSettings = normalizeLocalExclusionSettings(
+        multiSolveOverlayState?.localExclusions ?? normalizedSettings,
+        getDefaultLocalExclusionSettings(),
+      );
       try {
         multiSolveOverlayState.poolSettings = poolSettings;
         multiSolveOverlayState.localExclusions = localSettings;
@@ -13686,8 +13794,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       !multiSolveOverlayState?.poolSettings
     ) {
       try {
-        const globalSettings = await getSolverSettingsForChallenge(null).catch(
-          () => getDefaultSolverSettings(),
+        const globalSettings = await hydrateSavedGlobalExclusions(
+          await getSolverSettingsForChallenge(null).catch(() =>
+            getDefaultSolverSettings(),
+          ),
         );
         const settings = await getSolverSettingsForChallenge(challengeId);
         multiSolveOverlayState.globalSettings = globalSettings;
@@ -13705,8 +13815,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       } catch {}
     } else {
       try {
-        const globalSettings = await getSolverSettingsForChallenge(null).catch(
-          () => getDefaultSolverSettings(),
+        const globalSettings = await hydrateSavedGlobalExclusions(
+          await getSolverSettingsForChallenge(null).catch(() =>
+            getDefaultSolverSettings(),
+          ),
         );
         multiSolveOverlayState.globalSettings = globalSettings;
         multiSolveOverlayState.effectivePoolSettings = mergeLocalExclusionsIntoSettings(
@@ -18181,8 +18293,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       !setSolveOverlayState?.poolSettings
     ) {
       try {
-        const globalSettings = await getSolverSettingsForChallenge(null).catch(
-          () => getDefaultSolverSettings(),
+        const globalSettings = await hydrateSavedGlobalExclusions(
+          await getSolverSettingsForChallenge(null).catch(() =>
+            getDefaultSolverSettings(),
+          ),
         );
         const settings = await getSolverSettingsForChallenge(challengeId);
         const localExclusions = await getSetSolverLocalExclusions(setId).catch(
@@ -18204,8 +18318,10 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       } catch {}
     } else {
       try {
-        const globalSettings = await getSolverSettingsForChallenge(null).catch(
-          () => getDefaultSolverSettings(),
+        const globalSettings = await hydrateSavedGlobalExclusions(
+          await getSolverSettingsForChallenge(null).catch(() =>
+            getDefaultSolverSettings(),
+          ),
         );
         setSolveOverlayState.globalSettings = globalSettings;
         setSolveOverlayState.effectivePoolSettings = mergeLocalExclusionsIntoSettings(
@@ -20004,23 +20120,78 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                             )}</div>`
                       }
         <div class="ea-data-sequence-step-grid">
-          <div class="ea-data-sequence-field">
+          <div class="ea-data-sequence-field ea-data-sequence-field--span-2">
             <label class="ea-data-sequence-label">Rating Range</label>
-            <div class="ea-data-sequence-range-row">
-                            <input class="ea-data-sequence-input" type="number" min="0" max="99" step="1" value="${escapeHtml(
-                              normalizedStep?.settingsSnapshot?.ratingRange
-                                ?.ratingMin ?? 0,
-                            )}" data-step-id="${escapeHtml(
-                              normalizedStep?.id,
-                            )}" data-step-field="ratingMin" ${isRunning ? "disabled" : ""} />
-                            <input class="ea-data-sequence-input" type="number" min="0" max="99" step="1" value="${escapeHtml(
-                              normalizedStep?.settingsSnapshot?.ratingRange
-                                ?.ratingMax ?? 99,
-                            )}" data-step-id="${escapeHtml(
-                              normalizedStep?.id,
-                            )}" data-step-field="ratingMax" ${isRunning ? "disabled" : ""} />
-                          </div>
-                        </div>
+            <div class="ea-data-sequence-range-wrap" data-step-range-group="${escapeHtml(
+              normalizedStep?.id,
+            )}">
+              <div class="ea-data-range${
+                isRunning ? " ea-data-range--locked" : ""
+              }" data-step-range-root="${escapeHtml(normalizedStep?.id)}">
+                <div class="ea-data-range__track"></div>
+                <input
+                  class="ea-data-range__input ea-data-range__input--min"
+                  type="range"
+                  min="0"
+                  max="99"
+                  step="1"
+                  value="${escapeHtml(
+                    normalizedStep?.settingsSnapshot?.ratingRange?.ratingMin ?? 0,
+                  )}"
+                  data-step-range-input="min"
+                  ${isRunning ? "disabled" : ""}
+                />
+                <input
+                  class="ea-data-range__input ea-data-range__input--max"
+                  type="range"
+                  min="0"
+                  max="99"
+                  step="1"
+                  value="${escapeHtml(
+                    normalizedStep?.settingsSnapshot?.ratingRange?.ratingMax ?? 99,
+                  )}"
+                  data-step-range-input="max"
+                  ${isRunning ? "disabled" : ""}
+                />
+              </div>
+              <div class="ea-data-sequence-range-row">
+                <div class="ea-data-range__field">
+                  <div class="ea-data-range__label">Min</div>
+                  <input
+                    class="ea-data-range__number"
+                    type="number"
+                    min="0"
+                    max="99"
+                    step="1"
+                    value="${escapeHtml(
+                      normalizedStep?.settingsSnapshot?.ratingRange?.ratingMin ??
+                        0,
+                    )}"
+                    inputmode="numeric"
+                    data-step-range-number="min"
+                    ${isRunning ? "disabled" : ""}
+                  />
+                </div>
+                <div class="ea-data-range__field">
+                  <div class="ea-data-range__label">Max</div>
+                  <input
+                    class="ea-data-range__number"
+                    type="number"
+                    min="0"
+                    max="99"
+                    step="1"
+                    value="${escapeHtml(
+                      normalizedStep?.settingsSnapshot?.ratingRange?.ratingMax ??
+                        99,
+                    )}"
+                    inputmode="numeric"
+                    data-step-range-number="max"
+                    ${isRunning ? "disabled" : ""}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
           <div class="ea-data-sequence-field ea-data-sequence-field--span-2">
             <label class="ea-data-sequence-label">Pool Options</label>
             <div class="ea-data-sequence-toggle-list">${toggleRows}</div>
@@ -20051,6 +20222,104 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         sequenceSolveOverlayState?.defaultSettings,
         getDefaultSolverSettings(),
       );
+      const rangeRoots = stepsPanelEl
+        ? Array.from(stepsPanelEl.querySelectorAll("[data-step-range-root]"))
+        : [];
+      for (const root of rangeRoots) {
+        const stepId = root.getAttribute("data-step-range-root");
+        const step = plan?.steps?.find(
+          (entry) => String(entry?.id) === String(stepId),
+        );
+        if (!step) continue;
+        const group = root.closest("[data-step-range-group]");
+        const minRange = root.querySelector('[data-step-range-input="min"]');
+        const maxRange = root.querySelector('[data-step-range-input="max"]');
+        const minInput = group?.querySelector('[data-step-range-number="min"]');
+        const maxInput = group?.querySelector('[data-step-range-number="max"]');
+        const syncStepRange = (range, { source } = {}) => {
+          const raw = range && typeof range === "object" ? range : {};
+          const currentRange = normalizeRatingRange(
+            step?.settingsSnapshot?.ratingRange,
+          );
+          let ratingMin = clampInt(
+            raw.ratingMin ?? raw.min ?? raw.minRating ?? raw.min_rating,
+            0,
+            99,
+          );
+          let ratingMax = clampInt(
+            raw.ratingMax ?? raw.max ?? raw.maxRating ?? raw.max_rating,
+            0,
+            99,
+          );
+          if (ratingMin == null) ratingMin = currentRange.ratingMin;
+          if (ratingMax == null) ratingMax = currentRange.ratingMax;
+          if (ratingMin > ratingMax) {
+            if (source === "min") ratingMin = ratingMax;
+            else if (source === "max") ratingMax = ratingMin;
+            else {
+              const tmp = ratingMin;
+              ratingMin = ratingMax;
+              ratingMax = tmp;
+            }
+          }
+          if (minRange) minRange.value = String(ratingMin);
+          if (maxRange) maxRange.value = String(ratingMax);
+          if (minInput) minInput.value = String(ratingMin);
+          if (maxInput) maxInput.value = String(ratingMax);
+          if (ratingMin === ratingMax) {
+            if (minRange) minRange.style.zIndex = "6";
+            if (maxRange) maxRange.style.zIndex = "5";
+            if (source === "max") {
+              if (maxRange) maxRange.style.zIndex = "6";
+              if (minRange) minRange.style.zIndex = "5";
+            }
+          } else {
+            if (minRange) minRange.style.zIndex = "";
+            if (maxRange) maxRange.style.zIndex = "";
+          }
+          const minPct = (ratingMin / 99) * 100;
+          const maxPct = (ratingMax / 99) * 100;
+          root?.style?.setProperty("--min-pct", `${minPct}%`);
+          root?.style?.setProperty("--max-pct", `${maxPct}%`);
+          step.settingsSnapshot = normalizeSolverSettingsInput(
+            {
+              ...step.settingsSnapshot,
+              ratingRange: { ratingMin, ratingMax },
+            },
+            sequenceSolveOverlayState?.defaultSettings ??
+              getDefaultSolverSettings(),
+          );
+          if (source !== "init") {
+            touchPlans();
+            sequenceSolveOverlayState?.syncActions?.();
+          }
+        };
+        syncStepRange(step?.settingsSnapshot?.ratingRange, { source: "init" });
+        minRange?.addEventListener("input", () =>
+          syncStepRange(
+            { ratingMin: minRange.value, ratingMax: maxRange?.value },
+            { source: "min" },
+          ),
+        );
+        maxRange?.addEventListener("input", () =>
+          syncStepRange(
+            { ratingMin: minRange?.value, ratingMax: maxRange.value },
+            { source: "max" },
+          ),
+        );
+        minInput?.addEventListener("input", () =>
+          syncStepRange(
+            { ratingMin: minInput.value, ratingMax: maxInput?.value },
+            { source: "min" },
+          ),
+        );
+        maxInput?.addEventListener("input", () =>
+          syncStepRange(
+            { ratingMin: minInput?.value, ratingMax: maxInput.value },
+            { source: "max" },
+          ),
+        );
+      }
       const editors = stepsPanelEl
         ? Array.from(stepsPanelEl.querySelectorAll("[data-sequence-local-editor]"))
         : [];

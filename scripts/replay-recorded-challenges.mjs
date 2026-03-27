@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { buildSolverContext, solveSquad } from "../solver/solver.js";
 import { compileConstraintSet } from "../solver/constraint-compiler.js";
 
@@ -338,6 +339,192 @@ const normalizeRecordedRequirements = (rules) =>
     return normalized;
   });
 
+export const buildReplayReport = ({
+  requirementsJson,
+  requirementsPath = null,
+  playersJson = null,
+  playersPath = null,
+  slotPlan = null,
+  ignoreChemistry = false,
+  useEvolutionPlayers = false,
+  allRecords = false,
+  compileOnly = false,
+} = {}) => {
+  let records = extractRecords(requirementsJson);
+  records = allRecords ? records : dedupeRecordsByChallenge(records);
+  records = records
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftAt = Date.parse(left?.openedAt || "") || 0;
+      const rightAt = Date.parse(right?.openedAt || "") || 0;
+      return leftAt - rightAt;
+    });
+
+  let players = [];
+  let identityCoverageIndex = null;
+  if (!compileOnly) {
+    players = dedupePlayersById(extractPlayers(playersJson));
+    if (!players.length) {
+      throw new Error("No players parsed from players input");
+    }
+    identityCoverageIndex = buildIdentityCoverageIndex(players);
+  }
+
+  const rows = [];
+  for (const record of records) {
+    const requirements = normalizeRecordedRequirements(record?.requirementsNormalized);
+    const fallbackSquadSize = asNumber(record?.squadSize) || 11;
+    const chemistryNeeded = requirements.some(
+      (rule) =>
+        rule?.type === "chemistry_points" ||
+        rule?.type === "all_players_chemistry_points",
+    );
+    const recordedSlotPlan = buildRecordedSlotPlan(record, fallbackSquadSize);
+    const effectiveSlotPlan =
+      slotPlan ||
+      recordedSlotPlan ||
+      (chemistryNeeded ? buildDefaultSlotPlan(fallbackSquadSize) : null);
+    const compiled = compileConstraintSet(requirements, {
+      fallbackSquadSize,
+    });
+    const signature = toChallengeSignature(compiled.constraints);
+    const playerPoolCoverage = compileOnly
+      ? null
+      : analyzeIdentityCoverage(compiled.constraints, identityCoverageIndex);
+
+    let solveResult = null;
+    let solved = null;
+    let evoUsedCount = null;
+    let failingCompiled = { constraints: [], summary: {} };
+    if (!compileOnly) {
+      const context = buildSolverContext({
+        players,
+        requirementsNormalized: requirements,
+        requirementOverrides: ignoreChemistry
+          ? {
+              chemistry_points: false,
+              all_players_chemistry_points: false,
+            }
+          : {},
+        debug: false,
+        filters: {
+          useEvolutionPlayers,
+        },
+        requiredPlayers: effectiveSlotPlan?.requiredPlayers ?? null,
+        squadSlots: effectiveSlotPlan?.squadSlots ?? null,
+      });
+      solveResult = solveSquad(context);
+      const failingRequirements = ensureArray(solveResult?.failingRequirements);
+      failingCompiled = compileConstraintSet(failingRequirements, {
+        fallbackSquadSize:
+          compiled.summary.squadSizeTarget || fallbackSquadSize,
+      });
+      solved =
+        ensureArray(solveResult?.solutions).length > 0 &&
+        failingRequirements.length === 0;
+      const solutionPlayers = ensureArray(solveResult?.solutions).flatMap(
+        (solution) => ensureArray(solution?.players),
+      );
+      const evoIds = new Set(
+        solutionPlayers
+          .filter((player) => Boolean(player?.isEvolution ?? player?.upgrades))
+          .map((player) => (player?.id == null ? null : String(player.id)))
+          .filter(Boolean),
+      );
+      evoUsedCount = evoIds.size;
+    }
+
+    const failingTypes = Array.from(
+      new Set((failingCompiled.constraints || []).map((constraint) => constraint.type)),
+    );
+    const failingLabels = Array.from(
+      new Set(
+        ensureArray(solveResult?.failingRequirements)
+          .map((rule) => rule?.label || null)
+          .filter(Boolean),
+      ),
+    );
+
+    rows.push({
+      challengeId: record?.challengeId ?? null,
+      setId: record?.setId ?? null,
+      challengeName: record?.challengeName ?? null,
+      openedAt: record?.openedAt ?? null,
+      formationName: record?.formationName ?? null,
+      formationCode: record?.formationCode ?? null,
+      slotPlanSource: effectiveSlotPlan?.source || (slotPlan ? "input-slots" : null),
+      signature,
+      constraintCount: compiled.summary.compiledCount || 0,
+      constraintTypes: Array.from(
+        new Set((compiled.constraints || []).map((constraint) => constraint.type)),
+      ),
+      constraintCategories: Object.keys(compiled.summary.byCategory || {}),
+      squadSizeTarget: compiled.summary.squadSizeTarget ?? null,
+      teamRatingTarget: compiled.summary.teamRatingTarget ?? null,
+      solved,
+      failingTypes,
+      failingLabels,
+      solveStats: solveResult?.stats ?? null,
+      evoUsedCount,
+      playerPoolCoverage,
+    });
+  }
+
+  const solvedRows = rows.filter((row) => row.solved === true);
+  const unsolvedRows = rows.filter((row) => row.solved === false);
+  const constrainedRows = rows.filter((row) => row.constraintCount > 0);
+  const solveRatePct =
+    compileOnly || !rows.length
+      ? null
+      : Math.round((solvedRows.length / rows.length) * 10000) / 100;
+
+  return {
+    generatedAt: new Date().toISOString(),
+    mode: compileOnly ? "compile-only" : "replay",
+    inputs: {
+      requirementsPath,
+      playersPath,
+      challengeRecords: rows.length,
+      players: players.length,
+      dedupedChallenges: !allRecords,
+      useEvolutionPlayers,
+      ignoreChemistry,
+      providedSlots: Boolean(slotPlan),
+    },
+    summary: {
+      solved: solvedRows.length,
+      unsolved: unsolvedRows.length,
+      solveRatePct,
+      withConstraints: constrainedRows.length,
+      signatures: countBy(rows, (row) => row.signature || "none"),
+      constraintTypes: countBy(
+        rows.flatMap((row) => row.constraintTypes || []),
+        (type) => type || "unknown",
+      ),
+      constraintCategories: countBy(
+        rows.flatMap((row) => row.constraintCategories || []),
+        (category) => category || "unknown",
+      ),
+      unsolvedTypes: countBy(
+        unsolvedRows.flatMap((row) => row.failingTypes || []),
+        (type) => type || "unknown",
+      ),
+      slotPlanSources: countBy(
+        rows.map((row) => row.slotPlanSource || "none"),
+        (source) => source || "none",
+      ),
+      likelyMissingCoverage: unsolvedRows.filter(
+        (row) => row.playerPoolCoverage?.likelyMissingCoverage,
+      ).length,
+      evoUsedAcrossSolved: solvedRows.reduce(
+        (total, row) => total + (Number(row.evoUsedCount) || 0),
+        0,
+      ),
+    },
+    results: rows,
+  };
+};
+
 const run = async () => {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -354,27 +541,12 @@ const run = async () => {
 
   const requirementsPath = path.resolve(args.requirements);
   const requirementsJson = await readJson(requirementsPath);
-  let records = extractRecords(requirementsJson);
-  records = args.allRecords ? records : dedupeRecordsByChallenge(records);
-  records = records
-    .filter(Boolean)
-    .sort((left, right) => {
-      const leftAt = Date.parse(left?.openedAt || "") || 0;
-      const rightAt = Date.parse(right?.openedAt || "") || 0;
-      return leftAt - rightAt;
-    });
 
   let playersPath = null;
-  let players = [];
-  let identityCoverageIndex = null;
+  let playersJson = null;
   if (!args.compileOnly) {
     playersPath = path.resolve(args.players);
-    const playersJson = await readJson(playersPath);
-    players = dedupePlayersById(extractPlayers(playersJson));
-    if (!players.length) {
-      throw new Error("No players parsed from --players file");
-    }
-    identityCoverageIndex = buildIdentityCoverageIndex(players);
+    playersJson = await readJson(playersPath);
   }
 
   let slotPlan = null;
@@ -395,157 +567,17 @@ const run = async () => {
     };
   }
 
-  const rows = [];
-  for (const record of records) {
-    const requirements = normalizeRecordedRequirements(record?.requirementsNormalized);
-    const fallbackSquadSize = asNumber(record?.squadSize) || 11;
-    const chemistryNeeded = requirements.some(
-      (rule) =>
-        rule?.type === "chemistry_points" ||
-        rule?.type === "all_players_chemistry_points",
-    );
-    const recordedSlotPlan = buildRecordedSlotPlan(record, fallbackSquadSize);
-    const effectiveSlotPlan =
-      slotPlan || recordedSlotPlan || (chemistryNeeded ? buildDefaultSlotPlan(fallbackSquadSize) : null);
-    const compiled = compileConstraintSet(requirements, {
-      fallbackSquadSize,
-    });
-    const signature = toChallengeSignature(compiled.constraints);
-    const playerPoolCoverage = args.compileOnly
-      ? null
-      : analyzeIdentityCoverage(compiled.constraints, identityCoverageIndex);
-
-    let solveResult = null;
-    let solved = null;
-    let evoUsedCount = null;
-    let failingCompiled = { constraints: [], summary: {} };
-    if (!args.compileOnly) {
-      const context = buildSolverContext({
-        players,
-        requirementsNormalized: requirements,
-        requirementOverrides: args.ignoreChemistry
-          ? {
-              chemistry_points: false,
-              all_players_chemistry_points: false,
-            }
-          : {},
-        debug: false,
-        filters: {
-          useEvolutionPlayers: args.useEvolutionPlayers,
-        },
-        requiredPlayers: effectiveSlotPlan?.requiredPlayers ?? null,
-        squadSlots: effectiveSlotPlan?.squadSlots ?? null,
-      });
-      solveResult = solveSquad(context);
-      const failingRequirements = ensureArray(solveResult?.failingRequirements);
-      failingCompiled = compileConstraintSet(failingRequirements, {
-        fallbackSquadSize:
-          compiled.summary.squadSizeTarget || fallbackSquadSize,
-      });
-      solved =
-        ensureArray(solveResult?.solutions).length > 0 &&
-        failingRequirements.length === 0;
-      const solutionPlayers = ensureArray(solveResult?.solutions).flatMap(
-        (solution) => ensureArray(solution?.players)
-      );
-      const evoIds = new Set(
-        solutionPlayers
-          .filter((player) => Boolean(player?.isEvolution ?? player?.upgrades))
-          .map((player) => (player?.id == null ? null : String(player.id)))
-          .filter(Boolean)
-      );
-      evoUsedCount = evoIds.size;
-    }
-
-    const failingTypes = Array.from(
-      new Set((failingCompiled.constraints || []).map((constraint) => constraint.type))
-    );
-    const failingLabels = Array.from(
-      new Set(
-        ensureArray(solveResult?.failingRequirements)
-          .map((rule) => rule?.label || null)
-          .filter(Boolean)
-      )
-    );
-
-    rows.push({
-      challengeId: record?.challengeId ?? null,
-      setId: record?.setId ?? null,
-      challengeName: record?.challengeName ?? null,
-      openedAt: record?.openedAt ?? null,
-      formationName: record?.formationName ?? null,
-      formationCode: record?.formationCode ?? null,
-      slotPlanSource: effectiveSlotPlan?.source || (slotPlan ? "input-slots" : null),
-      signature,
-      constraintCount: compiled.summary.compiledCount || 0,
-      constraintTypes: Array.from(
-        new Set((compiled.constraints || []).map((constraint) => constraint.type))
-      ),
-      constraintCategories: Object.keys(compiled.summary.byCategory || {}),
-      squadSizeTarget: compiled.summary.squadSizeTarget ?? null,
-      teamRatingTarget: compiled.summary.teamRatingTarget ?? null,
-      solved,
-      failingTypes,
-      failingLabels,
-      solveStats: solveResult?.stats ?? null,
-      evoUsedCount,
-      playerPoolCoverage,
-    });
-  }
-
-  const solvedRows = rows.filter((row) => row.solved === true);
-  const unsolvedRows = rows.filter((row) => row.solved === false);
-  const constrainedRows = rows.filter((row) => row.constraintCount > 0);
-  const solveRatePct =
-    args.compileOnly || !rows.length
-      ? null
-      : Math.round((solvedRows.length / rows.length) * 10000) / 100;
-
-  const report = {
-    generatedAt: new Date().toISOString(),
-    mode: args.compileOnly ? "compile-only" : "replay",
-    inputs: {
-      requirementsPath,
-      playersPath,
-      challengeRecords: rows.length,
-      players: players.length,
-      dedupedChallenges: !args.allRecords,
-      useEvolutionPlayers: args.useEvolutionPlayers,
-      ignoreChemistry: args.ignoreChemistry,
-      providedSlots: Boolean(slotPlan),
-    },
-    summary: {
-      solved: solvedRows.length,
-      unsolved: unsolvedRows.length,
-      solveRatePct,
-      withConstraints: constrainedRows.length,
-      signatures: countBy(rows, (row) => row.signature || "none"),
-      constraintTypes: countBy(
-        rows.flatMap((row) => row.constraintTypes || []),
-        (type) => type || "unknown"
-      ),
-      constraintCategories: countBy(
-        rows.flatMap((row) => row.constraintCategories || []),
-        (category) => category || "unknown"
-      ),
-      unsolvedTypes: countBy(
-        unsolvedRows.flatMap((row) => row.failingTypes || []),
-        (type) => type || "unknown"
-      ),
-      slotPlanSources: countBy(
-        rows.map((row) => row.slotPlanSource || "none"),
-        (source) => source || "none"
-      ),
-      likelyMissingCoverage: unsolvedRows.filter(
-        (row) => row.playerPoolCoverage?.likelyMissingCoverage,
-      ).length,
-      evoUsedAcrossSolved: solvedRows.reduce(
-        (total, row) => total + (Number(row.evoUsedCount) || 0),
-        0
-      ),
-    },
-    results: rows,
-  };
+  const report = buildReplayReport({
+    requirementsJson,
+    requirementsPath,
+    playersJson,
+    playersPath,
+    slotPlan,
+    ignoreChemistry: args.ignoreChemistry,
+    useEvolutionPlayers: args.useEvolutionPlayers,
+    allRecords: args.allRecords,
+    compileOnly: args.compileOnly,
+  });
 
   const defaultReport = path.resolve(
     `replay-report-${toIsoFileStamp()}.json`
@@ -555,12 +587,13 @@ const run = async () => {
 
   console.log("[Replay] Report written:", reportPath);
   console.log(
-    `[Replay] Challenges: ${rows.length}, Solved: ${solvedRows.length}, Unsolved: ${unsolvedRows.length}`
+    `[Replay] Challenges: ${report.inputs.challengeRecords}, Solved: ${report.summary.solved}, Unsolved: ${report.summary.unsolved}`
   );
   if (!args.compileOnly) {
-    console.log(`[Replay] Solve rate: ${solveRatePct}%`);
+    console.log(`[Replay] Solve rate: ${report.summary.solveRatePct}%`);
   }
 
+  const unsolvedRows = report.results.filter((row) => row.solved === false);
   if (unsolvedRows.length) {
     console.log(`[Replay] Top ${Math.min(args.top, unsolvedRows.length)} unsolved:`);
     for (const row of unsolvedRows.slice(0, args.top)) {
@@ -571,7 +604,13 @@ const run = async () => {
   }
 };
 
-run().catch((error) => {
-  console.error("[Replay] Failed:", error?.message || error);
-  process.exitCode = 1;
-});
+const isMainModule = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isMainModule) {
+  run().catch((error) => {
+    console.error("[Replay] Failed:", error?.message || error);
+    process.exitCode = 1;
+  });
+}
