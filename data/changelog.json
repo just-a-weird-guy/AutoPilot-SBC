@@ -2,6 +2,17 @@
   "version": 1,
   "releases": [
     {
+      "version": "1.7.1",
+      "date": "2026-03-27",
+      "headline": "Fixes and patching",
+      "summary": "Cleaned up recent issues and patched smaller rough edges across the extension.",
+      "details": [
+        "Added a ratings slider to the sequence solver",
+        "Made small UI tweaks for consistency.",
+        "Fixed multi solver not syncing with global settings."
+      ]
+    },
+    {
       "version": "1.7",
       "date": "2026-03-22",
       "headline": "Sequence Solver fixes",
