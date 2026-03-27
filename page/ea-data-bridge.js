@@ -13799,14 +13799,14 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             getDefaultSolverSettings(),
           ),
         );
-        const settings = await getSolverSettingsForChallenge(challengeId);
         multiSolveOverlayState.globalSettings = globalSettings;
+        const settings = await getSolverSettingsForChallenge(
+          challengeId,
+        ).catch(() => getDefaultSolverSettings());
         multiSolveOverlayState?.syncRatingRange?.(settings?.ratingRange, {
           source: "open",
         });
-        syncingLocalExclusions = true;
         multiSolveOverlayState?.syncPoolSettings?.(settings);
-        syncingLocalExclusions = false;
         multiSolveOverlayState?.localExclusionsEditor?.sync?.({
           settings,
           globalSettings,
