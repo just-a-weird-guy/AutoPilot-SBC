@@ -11300,6 +11300,19 @@ input.ea-data-range__input:disabled::-moz-range-progress {
   let sequenceSolveOverlayState = null;
   let sequenceSolveOverlayKeyHandlerBound = false;
 
+  const isSolverWorkflowActive = () =>
+    Boolean(
+      multiSolveOverlayState?.running ||
+        setSolveOverlayState?.running ||
+        sequenceSolveOverlayState?.running,
+    );
+
+  const getAutoFetchSuppressionReason = () => {
+    if (isSbcAutomationActive()) return "automation-active";
+    if (isSolverWorkflowActive()) return "solver-workflow-active";
+    return null;
+  };
+
   const closeMultiSolveOverlay = () => {
     const overlay = document.getElementById("ea-data-multisolve-overlay");
     if (!overlay) return;
@@ -12154,6 +12167,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       { minGapMs: SBC_AUTOMATION_SUBMIT_MIN_GAP_MS, maxAttempts: 1 },
     );
     if (result?.success === true) {
+      markPendingCompletionAutoFetch({
+        setId: challenge?.setId ?? setEntity?.id ?? null,
+        challengeId: challenge?.id ?? null,
+        source: "submit-success",
+      });
       clearPlayersSnapshotCache({
         clearWarmLookup: true,
         bumpRevision: true,
@@ -13389,6 +13407,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           const result = await callSolveBridge(
             {
               players: filteredPlayers,
+              _cacheRevision: payload?._cacheRevision ?? null,
               requirements: safeRequirements,
               requirementsNormalized: safeRequirementsNormalized,
               requiredPlayers: payload.requiredPlayers ?? null,
@@ -16871,6 +16890,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             const result = await callSolveBridge(
               {
                 players: filteredPlayers,
+                _cacheRevision: payload?._cacheRevision ?? null,
                 requirements: safeRequirements,
                 requirementsNormalized: safeRequirementsNormalized,
                 requiredPlayers: slotInfo.requiredPlayers ?? null,
@@ -17112,6 +17132,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             const result = await callSolveBridge(
               {
                 players: filteredPlayers,
+                _cacheRevision: payload?._cacheRevision ?? null,
                 requirements: safeRequirements,
                 requirementsNormalized: safeRequirementsNormalized,
                 requiredPlayers: slotInfo.requiredPlayers ?? null,
@@ -17567,6 +17588,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   const freshPayload = await window.eaData.getSolverPayload({
                     ignoreLoaned: true,
                     forcePlayersFetch: true,
+                    preferWarmSnapshot: false,
                   });
                   const freshPlayers = Array.isArray(freshPayload?.players)
                     ? freshPayload.players
@@ -17626,6 +17648,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
                   const reSolveResult = await callSolveBridge(
                     {
                       players: reSolvePlayers,
+                      _cacheRevision: freshPayload?._cacheRevision ?? null,
                       requirements: reSolveReqs,
                       requirementsNormalized: reSolveReqsNorm,
                       requiredPlayers: reSolveSlotInfo?.requiredPlayers ?? null,
@@ -21184,6 +21207,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const solveResult = await callSolveBridge(
         {
           players: filteredPlayers,
+          _cacheRevision: runContext?._cacheRevision ?? null,
           requirements: safeRequirements,
           requirementsNormalized: safeRequirementsNormalized,
           requiredPlayers: slotInfo?.requiredPlayers ?? null,
@@ -21447,7 +21471,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         const payload = await window.eaData.getSolverPayload(
           {
             ignoreLoaned: true,
-            forcePlayersFetch: true,
+            preferWarmSnapshot: true,
           },
           allSetIds,
         );
@@ -21469,6 +21493,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         const runContext = {
           allPlayers,
           playerById,
+          _cacheRevision: payload?._cacheRevision ?? null,
           prioritize: payload?.prioritize ?? null,
           baseFilters,
           currentStepLabel: null,
@@ -22872,6 +22897,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           const freshPayload = await window.eaData.getSolverPayload({
             ignoreLoaned: true,
             forcePlayersFetch: true,
+            preferWarmSnapshot: false,
           });
           if (
             startedChallengeId != null &&
@@ -22937,6 +22963,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           const retryResult = await callSolveBridge(
             {
               players: retryPlayers,
+              _cacheRevision: freshPayload?._cacheRevision ?? null,
               requirements: retryRequirements,
               requirementsNormalized: retryRequirementsNormalized,
               requiredPlayers: freshPayload?.requiredPlayers ?? null,
@@ -22978,6 +23005,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         const result = await callSolveBridge(
           {
             players: filteredPlayers,
+            _cacheRevision: payload?._cacheRevision ?? null,
             requirements: safeRequirements,
             requirementsNormalized: safeRequirementsNormalized,
             requiredPlayers: payload.requiredPlayers ?? null,
@@ -23180,6 +23208,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               const diagnosticResult = await callSolveBridge(
                 {
                   players: filteredPlayers,
+                  _cacheRevision: payload?._cacheRevision ?? null,
                   requirements: safeRequirements,
                   requirementsNormalized: safeRequirementsNormalized,
                   requiredPlayers: payload.requiredPlayers ?? null,
@@ -23365,6 +23394,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       solverVersion: stats?.solverVersion ?? null,
       debugLogLength: stats?.debugLog?.length ?? 0,
     });
+    if (stats?.orchestration) {
+      _log("[EA Data] Solver orchestration", stats.orchestration);
+    }
     if (stats?.debugLog?.length) {
       _log("[EA Data] Solver debug log", stats.debugLog);
     }
@@ -26741,41 +26773,304 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     return true;
   };
 
-  const triggerAutoFetchForSet = (
-    setId,
-    { reason = "unknown", challengeId = null } = {},
-  ) => {
-    if (!autoFetchEnabled) return;
-    const normalizedSetId = readNumeric(setId);
-    if (normalizedSetId == null) return;
+  const normalizeAutoFetchRequest = ({
+    reason = "unknown",
+    source = null,
+    setId = null,
+    challengeId = null,
+    allowSetInfoPrefetch = true,
+  } = {}) => ({
+    reason: String(reason ?? "unknown"),
+    source: source == null ? null : String(source),
+    setId: readNumeric(setId),
+    challengeId: readNumeric(challengeId),
+    allowSetInfoPrefetch: allowSetInfoPrefetch !== false,
+  });
+
+  const getAutoFetchCooldownMs = (reason) =>
+    Math.max(0, readNumeric(AUTO_FETCH_TRIGGER_COOLDOWNS_MS?.[reason]) ?? 0);
+
+  const buildAutoFetchCooldownKey = (request) => {
+    const reason = String(request?.reason ?? "unknown");
+    switch (reason) {
+      case "session-prime":
+        return "session-prime";
+      case "challenge-open":
+        return `challenge-open:${request?.challengeId ?? request?.setId ?? "global"}`;
+      case "set-open":
+      case "sbc-hub-enter":
+        return `${reason}:${request?.setId ?? "global"}`;
+      default:
+        return `${reason}:${request?.challengeId ?? request?.setId ?? "global"}`;
+    }
+  };
+
+  const logAutoFetchSkipped = (request, skipReason, extra = {}) => {
+    log("debug", "[EA Data] Auto-fetch skipped", {
+      reason: request?.reason ?? "unknown",
+      source: request?.source ?? null,
+      setId: request?.setId ?? null,
+      challengeId: request?.challengeId ?? null,
+      skipReason,
+      ...extra,
+    });
+  };
+
+  const logAutoFetchQueued = (request, queueReason, replacedRequest = null) => {
+    log("debug", "[EA Data] Auto-fetch queued", {
+      reason: request?.reason ?? "unknown",
+      source: request?.source ?? null,
+      setId: request?.setId ?? null,
+      challengeId: request?.challengeId ?? null,
+      queueReason,
+      replaced:
+        replacedRequest != null
+          ? {
+              reason: replacedRequest?.reason ?? "unknown",
+              source: replacedRequest?.source ?? null,
+              setId: replacedRequest?.setId ?? null,
+              challengeId: replacedRequest?.challengeId ?? null,
+            }
+          : null,
+    });
+  };
+
+  const maybePrefetchAutoFetchSetInfo = (request) => {
+    const normalizedSetId = readNumeric(request?.setId);
+    if (normalizedSetId == null || request?.allowSetInfoPrefetch !== true) return;
     void prefetchSetChallengeInfo(normalizedSetId, {
-      reason: `${reason}-set-info`,
+      reason: `${request?.reason ?? "unknown"}-set-info`,
     }).catch((error) => {
       log("debug", "[EA Data] Set info prefetch failed", {
-        reason,
+        reason: request?.reason ?? "unknown",
+        source: request?.source ?? null,
         setId: normalizedSetId,
+        challengeId: request?.challengeId ?? null,
         error,
       });
     });
+  };
+
+  const markAutoFetchRequestAccepted = (request) => {
+    if (request?.reason === "session-prime") autoFetchSessionPrimed = true;
+    const cooldownMs = getAutoFetchCooldownMs(request?.reason);
+    if (cooldownMs > 0) {
+      autoFetchCooldownByKey.set(buildAutoFetchCooldownKey(request), Date.now());
+    }
+    maybePrefetchAutoFetchSetInfo(request);
+  };
+
+  const markAutoFetchRequestCompleted = (request) => {
+    autoFetchLastCompletedRequest = {
+      reason: request?.reason ?? "unknown",
+      source: request?.source ?? null,
+      setId: request?.setId ?? null,
+      challengeId: request?.challengeId ?? null,
+      at: Date.now(),
+    };
+  };
+
+  const hasRecentAutoFetchActivity = (
+    maxAgeMs = AUTO_FETCH_RECENT_GLOBAL_WARM_MS,
+  ) => {
+    if (autoFetchInFlight || autoFetchQueuedTimerId != null) return true;
+    return (
+      Date.now() - Number(autoFetchLastStartedAt ?? 0) <=
+      Math.max(1000, maxAgeMs)
+    );
+  };
+
+  const shouldSkipChallengeOpenAutoFetch = (request) => {
+    if (String(request?.reason ?? "") !== "challenge-open") return false;
+    const requestChallengeId = readNumeric(request?.challengeId);
+    const activeChallengeId = readNumeric(currentChallenge?.id);
+    if (
+      requestChallengeId != null &&
+      activeChallengeId != null &&
+      Number(requestChallengeId) !== Number(activeChallengeId)
+    ) {
+      return false;
+    }
+    return hasRecentAutoFetchActivity();
+  };
+
+  const scheduleAutoFetchQueueDrain = () => {
     if (autoFetchInFlight) return;
+    if (!autoFetchQueuedRequest) return;
+    try {
+      if (autoFetchQueuedTimerId != null) clearTimeout(autoFetchQueuedTimerId);
+    } catch {}
+    const waitMs = Math.max(
+      0,
+      autoFetchLastStartedAt + AUTO_FETCH_GLOBAL_MIN_GAP_MS - Date.now(),
+    );
+    autoFetchQueuedTimerId = setTimeout(() => {
+      autoFetchQueuedTimerId = null;
+      if (autoFetchInFlight) return;
+      const request = autoFetchQueuedRequest;
+      autoFetchQueuedRequest = null;
+      if (!request) return;
+      if (typeof window.eaData?.triggerFetch !== "function") {
+        logAutoFetchSkipped(request, "bridge-unready");
+        return;
+      }
+      if (!autoFetchEnabled) {
+        logAutoFetchSkipped(request, "disabled");
+        return;
+      }
+      const suppressionReason = getAutoFetchSuppressionReason();
+      if (suppressionReason) {
+        logAutoFetchSkipped(request, suppressionReason);
+        return;
+      }
+      if (shouldSkipChallengeOpenAutoFetch(request)) {
+        logAutoFetchSkipped(request, "recent-auto-fetch-empty-challenge", {
+          lastReason: autoFetchLastCompletedRequest?.reason ?? null,
+          lastCompletedAt: autoFetchLastCompletedRequest?.at ?? null,
+          queued: true,
+        });
+        return;
+      }
+      autoFetchInFlight = true;
+      autoFetchLastStartedAt = Date.now();
+      log("debug", "[EA Data] Auto-fetch started", {
+        reason: request?.reason ?? "unknown",
+        source: request?.source ?? null,
+        setId: request?.setId ?? null,
+        challengeId: request?.challengeId ?? null,
+        queued: true,
+      });
+      Promise.resolve()
+        .then(() =>
+          window.eaData.triggerFetch(
+            { ignoreLoaned: true, includeChallenges: false },
+            request?.setId != null ? [request.setId] : [],
+            { silent: true },
+          ),
+        )
+        .then((data) => {
+          markAutoFetchRequestCompleted(request);
+          log("info", "[EA Data] Auto-fetch complete", {
+            reason: request?.reason ?? "unknown",
+            source: request?.source ?? null,
+            setId: request?.setId ?? null,
+            challengeId: request?.challengeId ?? null,
+            club: data?.clubPlayers?.length ?? 0,
+            storage: data?.storagePlayers?.length ?? 0,
+            challenges: data?.sbcChallenges?.length ?? 0,
+            queued: true,
+          });
+        })
+        .catch((error) => {
+          log("debug", "[EA Data] Auto-fetch failed", {
+            reason: request?.reason ?? "unknown",
+            source: request?.source ?? null,
+            setId: request?.setId ?? null,
+            challengeId: request?.challengeId ?? null,
+            error,
+            queued: true,
+          });
+        })
+        .finally(() => {
+          autoFetchInFlight = false;
+          scheduleAutoFetchQueueDrain();
+        });
+    }, waitMs);
+  };
+
+  const requestAutoFetch = (
+    requestInput = {},
+    { bypassTriggerCooldown = false, allowQueueDuringGlobalGap = false } = {},
+  ) => {
+    const request = normalizeAutoFetchRequest(requestInput);
+    if (typeof window.eaData?.triggerFetch !== "function") {
+      logAutoFetchSkipped(request, "bridge-unready");
+      return { status: "skipped", reason: "bridge-unready" };
+    }
+    if (!autoFetchEnabled) {
+      logAutoFetchSkipped(request, "disabled");
+      return { status: "skipped", reason: "disabled" };
+    }
+    const suppressionReason = getAutoFetchSuppressionReason();
+    if (suppressionReason) {
+      logAutoFetchSkipped(request, suppressionReason);
+      return { status: "skipped", reason: suppressionReason };
+    }
+    if (request?.reason === "session-prime" && autoFetchSessionPrimed) {
+      logAutoFetchSkipped(request, "session-primed");
+      return { status: "skipped", reason: "session-primed" };
+    }
+    if (!bypassTriggerCooldown) {
+      const cooldownMs = getAutoFetchCooldownMs(request?.reason);
+      const lastAt = autoFetchCooldownByKey.get(buildAutoFetchCooldownKey(request));
+      if (
+        cooldownMs > 0 &&
+        lastAt != null &&
+        Date.now() - lastAt < Math.max(1000, cooldownMs)
+      ) {
+        logAutoFetchSkipped(request, "cooldown", {
+          cooldownMsRemaining: Math.max(0, cooldownMs - (Date.now() - lastAt)),
+        });
+        return { status: "skipped", reason: "cooldown" };
+      }
+    }
+    const withinGlobalGap =
+      Date.now() - autoFetchLastStartedAt < AUTO_FETCH_GLOBAL_MIN_GAP_MS;
+    if (autoFetchInFlight || autoFetchQueuedTimerId != null) {
+      markAutoFetchRequestAccepted(request);
+      const replaced = autoFetchQueuedRequest;
+      autoFetchQueuedRequest = request;
+      logAutoFetchQueued(
+        request,
+        autoFetchInFlight ? "in-flight" : "global-gap-drain",
+        replaced,
+      );
+      scheduleAutoFetchQueueDrain();
+      return { status: "queued", reason: "queued" };
+    }
+    if (withinGlobalGap) {
+      if (!allowQueueDuringGlobalGap) {
+        logAutoFetchSkipped(request, "cooldown", {
+          cooldownMsRemaining: Math.max(
+            0,
+            AUTO_FETCH_GLOBAL_MIN_GAP_MS - (Date.now() - autoFetchLastStartedAt),
+          ),
+        });
+        return { status: "skipped", reason: "cooldown" };
+      }
+      markAutoFetchRequestAccepted(request);
+      const replaced = autoFetchQueuedRequest;
+      autoFetchQueuedRequest = request;
+      logAutoFetchQueued(request, "global-gap", replaced);
+      scheduleAutoFetchQueueDrain();
+      return { status: "queued", reason: "queued" };
+    }
+    markAutoFetchRequestAccepted(request);
     autoFetchInFlight = true;
+    autoFetchLastStartedAt = Date.now();
     log("debug", "[EA Data] Auto-fetch started", {
-      reason,
-      setId: normalizedSetId,
-      challengeId: challengeId ?? null,
+      reason: request?.reason ?? "unknown",
+      source: request?.source ?? null,
+      setId: request?.setId ?? null,
+      challengeId: request?.challengeId ?? null,
     });
-    window.eaData
-      ?.triggerFetch(
-        { ignoreLoaned: true, includeChallenges: false },
-        [normalizedSetId],
-        {
-          silent: true,
-        },
+    Promise.resolve()
+      .then(() =>
+        window.eaData.triggerFetch(
+          { ignoreLoaned: true, includeChallenges: false },
+          request?.setId != null ? [request.setId] : [],
+          {
+            silent: true,
+          },
+        ),
       )
       .then((data) => {
+        markAutoFetchRequestCompleted(request);
         log("info", "[EA Data] Auto-fetch complete", {
-          reason,
-          setId: normalizedSetId,
+          reason: request?.reason ?? "unknown",
+          source: request?.source ?? null,
+          setId: request?.setId ?? null,
+          challengeId: request?.challengeId ?? null,
           club: data?.clubPlayers?.length ?? 0,
           storage: data?.storagePlayers?.length ?? 0,
           challenges: data?.sbcChallenges?.length ?? 0,
@@ -26783,18 +27078,180 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       })
       .catch((error) => {
         log("debug", "[EA Data] Auto-fetch failed", {
-          reason,
-          setId: normalizedSetId,
+          reason: request?.reason ?? "unknown",
+          source: request?.source ?? null,
+          setId: request?.setId ?? null,
+          challengeId: request?.challengeId ?? null,
           error,
         });
       })
       .finally(() => {
         autoFetchInFlight = false;
+        scheduleAutoFetchQueueDrain();
       });
+    return { status: "started", reason: "started" };
   };
+
+  const markPendingCompletionAutoFetch = ({
+    setId,
+    challengeId = null,
+    source = "unknown",
+  } = {}) => {
+    const normalizedSetId = readNumeric(setId);
+    if (normalizedSetId == null) return false;
+    const suppressionReason = getAutoFetchSuppressionReason();
+    if (suppressionReason) {
+      autoFetchPendingCompletion = null;
+      log("debug", "[EA Data] Auto-fetch completion suppressed", {
+        setId: normalizedSetId,
+        challengeId: readNumeric(challengeId),
+        source: source == null ? null : String(source),
+        skipReason: suppressionReason,
+      });
+      return false;
+    }
+    autoFetchPendingCompletion = {
+      setId: normalizedSetId,
+      challengeId: readNumeric(challengeId),
+      source: source == null ? null : String(source),
+      expiresAt: Date.now() + AUTO_FETCH_COMPLETION_TTL_MS,
+    };
+    log("debug", "[EA Data] Auto-fetch completion pending", {
+      setId: normalizedSetId,
+      challengeId: readNumeric(challengeId),
+      source: source == null ? null : String(source),
+      expiresAt: autoFetchPendingCompletion.expiresAt,
+    });
+    return true;
+  };
+
+  const getPendingCompletionAutoFetch = () => {
+    const pending = autoFetchPendingCompletion ?? null;
+    if (!pending) return null;
+    if (Date.now() <= (pending?.expiresAt ?? 0)) return pending;
+    log("debug", "[EA Data] Auto-fetch completion expired", {
+      setId: pending?.setId ?? null,
+      challengeId: pending?.challengeId ?? null,
+      source: pending?.source ?? null,
+    });
+    autoFetchPendingCompletion = null;
+    return null;
+  };
+
+  const maybeConsumePendingCompletionAutoFetch = (
+    setId,
+    source = "unknown",
+  ) => {
+    const normalizedSetId = readNumeric(setId);
+    const pending = getPendingCompletionAutoFetch();
+    if (normalizedSetId == null || !pending) return false;
+    if (Number(pending?.setId) !== Number(normalizedSetId)) return false;
+    const result = requestAutoFetch(
+      {
+        reason: "challenge-complete-return",
+        source,
+        setId: normalizedSetId,
+        challengeId: pending?.challengeId ?? null,
+        allowSetInfoPrefetch: true,
+      },
+      {
+        bypassTriggerCooldown: true,
+        allowQueueDuringGlobalGap: true,
+      },
+    );
+    if (result?.status === "started" || result?.status === "queued") {
+      autoFetchPendingCompletion = null;
+      return true;
+    }
+    return false;
+  };
+
+  const maybeTriggerSessionPrimeAutoFetch = (source = "unknown") => {
+    if (autoFetchSessionPrimed) return false;
+    const result = requestAutoFetch({
+      reason: "session-prime",
+      source,
+      setId: null,
+      challengeId: null,
+      allowSetInfoPrefetch: false,
+    });
+    return result?.status === "started" || result?.status === "queued";
+  };
+
+  const maybeTriggerSbcHubAutoFetch = (source = "unknown") => {
+    const activeSetId =
+      readNumeric(currentSbcSet?.id) ??
+      readNumeric(currentChallenge?.setId) ??
+      null;
+    const activeChallengeId = readNumeric(currentChallenge?.id) ?? null;
+    if (maybeTriggerSessionPrimeAutoFetch(`sbc-hub:${source}`)) return true;
+    if (
+      activeSetId == null &&
+      activeChallengeId == null &&
+      hasRecentAutoFetchActivity()
+    ) {
+      logAutoFetchSkipped(
+        {
+          reason: "sbc-hub-enter",
+          source,
+          setId: null,
+          challengeId: null,
+        },
+        "recent-auto-fetch",
+        {
+          lastReason: autoFetchLastCompletedRequest?.reason ?? null,
+          lastCompletedAt: autoFetchLastCompletedRequest?.at ?? null,
+          lastStartedAt: autoFetchLastStartedAt,
+        },
+      );
+      return false;
+    }
+    if (
+      activeSetId != null &&
+      maybeConsumePendingCompletionAutoFetch(activeSetId, `sbc-hub:${source}`)
+    ) {
+      return true;
+    }
+    const result = requestAutoFetch({
+      reason: "sbc-hub-enter",
+      source,
+      setId: activeSetId,
+      challengeId: activeChallengeId,
+      allowSetInfoPrefetch: activeSetId != null,
+    });
+    return result?.status === "started" || result?.status === "queued";
+  };
+
+  const triggerAutoFetchForSet = (
+    setId,
+    { reason = "unknown", challengeId = null, source = null } = {},
+  ) =>
+    requestAutoFetch(
+      {
+        reason,
+        source,
+        setId,
+        challengeId,
+        allowSetInfoPrefetch: true,
+      },
+      {
+        allowQueueDuringGlobalGap:
+          reason === "set-open" ||
+          reason === "challenge-open" ||
+          reason === "challenge-complete-return",
+      },
+    );
 
   const mountSequenceEntryForHubView = (view, reason = "hub-render") => {
     currentSbcHubView = view ?? null;
+    try {
+      maybeTriggerSbcHubAutoFetch(reason);
+    } catch (error) {
+      log("debug", "[EA Data] SBC hub auto-fetch trigger failed", {
+        reason,
+        error,
+      });
+    }
     const mount = () => {
       try {
         ensureSequenceHubEntry(view ?? null);
@@ -26907,23 +27364,46 @@ input.ea-data-range__input:disabled::-moz-range-progress {
 
         const challengeId = payload?.id ?? null;
         const setId = payload?.setId ?? null;
+        const shouldReuseRecentChallengeFetch = shouldSkipChallengeOpenAutoFetch({
+          reason: "challenge-open",
+          challengeId,
+        });
         const isNewChallenge =
           Boolean(challengeId) && challengeId !== lastOpenedChallengeId;
 
         if (isNewChallenge) {
-          clearPlayersSnapshotCache({
-            clearWarmLookup: true,
-            bumpRevision: true,
-          });
+          if (!shouldReuseRecentChallengeFetch) {
+            clearPlayersSnapshotCache({
+              clearWarmLookup: true,
+              bumpRevision: true,
+            });
+          }
           lastOpenedChallengeId = challengeId;
           log("info", "[EA Data] SBC challenge opened", payload);
         }
 
         if (isNewChallenge) {
-          triggerAutoFetchForSet(setId, {
-            reason: "challenge-open",
-            challengeId: challengeId ?? null,
-          });
+          if (shouldReuseRecentChallengeFetch) {
+            logAutoFetchSkipped(
+              {
+                reason: "challenge-open",
+                source: "challenge-open",
+                setId,
+                challengeId: challengeId ?? null,
+              },
+              "recent-auto-fetch-empty-challenge",
+              {
+                lastReason: autoFetchLastCompletedRequest?.reason ?? null,
+                lastCompletedAt: autoFetchLastCompletedRequest?.at ?? null,
+              },
+            );
+          } else {
+            triggerAutoFetchForSet(setId, {
+              reason: "challenge-open",
+              challengeId: challengeId ?? null,
+              source: "challenge-open",
+            });
+          }
         }
 
         if (currentChallenge && isNewChallenge) {
@@ -26957,6 +27437,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
           } catch {}
           if (isActiveDetailView) {
             try {
+              const closingSetId = readNumeric(currentChallenge?.setId) ?? null;
               currentSbcDetailView = null;
               currentChallenge = null;
               lastOpenedChallengeId = null;
@@ -26967,6 +27448,12 @@ input.ea-data-range__input:disabled::-moz-range-progress {
               });
               log("info", "[EA Data] SBC challenge closed");
               window.postMessage({ type: "EA_SBC_CHALLENGE_CLOSED" }, "*");
+              if (closingSetId != null) {
+                maybeConsumePendingCompletionAutoFetch(
+                  closingSetId,
+                  "challenge-close-return",
+                );
+              }
               try {
                 if (!requestMultiSolveStop()) closeMultiSolveOverlay();
               } catch {}
@@ -27055,7 +27542,6 @@ input.ea-data-range__input:disabled::-moz-range-progress {
             setId,
             setName: setEntity?.name ?? null,
           });
-          triggerAutoFetchForSet(setId, { reason: "set-open" });
         }
         this.__eaDataLastSetSBCSetArgs = Array.isArray(args) ? args : [];
         this.__eaDataCurrentSetEntity = setEntity ?? null;
@@ -27065,6 +27551,16 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         cleanupSequenceHubEntry();
         disconnectSequenceEntryObserver();
         ensureSetSolveChooserButton(this, setEntity ?? null);
+        const consumedCompletion =
+          setId != null
+            ? maybeConsumePendingCompletionAutoFetch(setId, "set-open")
+            : false;
+        if (!consumedCompletion && isNewSet) {
+          triggerAutoFetchForSet(setId, {
+            reason: "set-open",
+            source: "set-open",
+          });
+        }
       } catch {}
       return result;
     };
@@ -27173,6 +27669,11 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       try {
         void tryAutoOpenWhatsNewFromHomeHub("home-viewDidAppear");
       } catch {}
+      try {
+        maybeTriggerSessionPrimeAutoFetch("home-viewDidAppear");
+      } catch (error) {
+        log("debug", "[EA Data] Home hub auto-fetch trigger failed", error);
+      }
       return result;
     };
 
@@ -27184,6 +27685,9 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       const currentController = getCurrentEaController();
       if (currentController instanceof UTHomeHubViewController) {
         void tryAutoOpenWhatsNewFromHomeHub("home-hook-installed-current");
+        try {
+          maybeTriggerSessionPrimeAutoFetch("home-hook-installed-current");
+        } catch {}
       }
     } catch {}
 
@@ -27205,6 +27709,20 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       try {
         const actionRoot = this?._actionBtn?.getRootElement?.() ?? null;
         if (actionRoot) rewardActionButtonRoots.add(actionRoot);
+      } catch {}
+      try {
+        const activeSetId =
+          readNumeric(currentChallenge?.setId) ??
+          readNumeric(currentSbcSet?.id) ??
+          null;
+        const activeChallengeId = readNumeric(currentChallenge?.id) ?? null;
+        if (activeSetId != null) {
+          markPendingCompletionAutoFetch({
+            setId: activeSetId,
+            challengeId: activeChallengeId,
+            source: "reward-view",
+          });
+        }
       } catch {}
       return result;
     };
@@ -28160,8 +28678,23 @@ input.ea-data-range__input:disabled::-moz-range-progress {
   };
 
   const pendingRequests = new Map();
+  const AUTO_FETCH_GLOBAL_MIN_GAP_MS = 2000;
+  const AUTO_FETCH_COMPLETION_TTL_MS = 30000;
+  const AUTO_FETCH_RECENT_GLOBAL_WARM_MS = 15000;
+  const AUTO_FETCH_TRIGGER_COOLDOWNS_MS = Object.freeze({
+    "sbc-hub-enter": 15000,
+    "set-open": 10000,
+    "challenge-open": 10000,
+  });
   let autoFetchEnabled = true;
   let autoFetchInFlight = false;
+  let autoFetchQueuedRequest = null;
+  let autoFetchQueuedTimerId = null;
+  let autoFetchLastStartedAt = 0;
+  let autoFetchLastCompletedRequest = null;
+  let autoFetchSessionPrimed = false;
+  let autoFetchPendingCompletion = null;
+  const autoFetchCooldownByKey = new Map();
 
   const sendToPage = (type, payload) =>
     new Promise((resolve, reject) => {
@@ -28557,14 +29090,30 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         ...options,
         excludeActiveSquad: options?.excludeActiveSquad ?? true,
       };
+      const preferWarmSnapshot = options?.preferWarmSnapshot !== false;
       const forcePlayersFetch =
         options?.forcePlayersFetch === true ||
         options?.forcePlayers === true ||
         options?.forceFetch === true ||
         options?.force === true;
+      const warmSnapshotReuseMs = Math.max(
+        0,
+        readNumeric(options?.warmSnapshotReuseMs) ?? 15000,
+      );
+      const snapshotStatus = getPlayersSnapshotStatus(solverOptions);
+      const canReuseWarmSnapshot =
+        preferWarmSnapshot &&
+        snapshotStatus?.cachedAgeMs != null &&
+        snapshotStatus.cachedAgeMs <= warmSnapshotReuseMs;
+      if (forcePlayersFetch && canReuseWarmSnapshot) {
+        log("debug", "[EA Data] Solver payload reusing warm players snapshot", {
+          cachedAgeMs: snapshotStatus?.cachedAgeMs ?? null,
+          warmSnapshotReuseMs,
+        });
+      }
       const { clubPlayers, storagePlayers, duplicateDefIds } =
         await ensurePlayersSnapshot(solverOptions, {
-          force: forcePlayersFetch,
+          force: forcePlayersFetch && !canReuseWarmSnapshot,
         });
       const requiredDuplicates =
         getChallengeSquadDefinitionIds(currentChallenge);
@@ -28692,6 +29241,7 @@ input.ea-data-range__input:disabled::-moz-range-progress {
         clubPlayers,
         storagePlayers: filteredStoragePlayers,
         players: mergedPlayers,
+        _cacheRevision: Number(playersFetchCacheRevision ?? 0),
         openChallenge: openReq,
         formationName,
         requiredPlayers,
@@ -28761,6 +29311,13 @@ input.ea-data-range__input:disabled::-moz-range-progress {
     getApplyMode: () => solverApplyMode,
     setAutoFetch: (enabled) => {
       autoFetchEnabled = Boolean(enabled);
+      if (!autoFetchEnabled) {
+        autoFetchQueuedRequest = null;
+        try {
+          if (autoFetchQueuedTimerId != null) clearTimeout(autoFetchQueuedTimerId);
+        } catch {}
+        autoFetchQueuedTimerId = null;
+      }
       console.log(
         "[EA Data] Auto-fetch",
         autoFetchEnabled ? "enabled" : "disabled",
@@ -28854,4 +29411,16 @@ input.ea-data-range__input:disabled::-moz-range-progress {
       keys: resolveEligibilityKeyEnum(),
     }),
   };
+
+  try {
+    const currentController = getCurrentEaController();
+    if (
+      typeof UTHomeHubViewController !== "undefined" &&
+      currentController instanceof UTHomeHubViewController
+    ) {
+      maybeTriggerSessionPrimeAutoFetch("bridge-ready-home");
+    } else if (currentSbcHubView) {
+      maybeTriggerSbcHubAutoFetch("bridge-ready-sbc-hub");
+    }
+  } catch {}
 })();

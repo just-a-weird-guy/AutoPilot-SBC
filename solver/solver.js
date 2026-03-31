@@ -968,7 +968,28 @@ const replacePlayer = (squad, outPlayer, inPlayer) => {
   return true;
 };
 
-const selectGroupForSameCount = (players, attr, required) => {
+const AXIS_TO_ATTR = {
+  league: "leagueId",
+  nation: "nationId",
+  club: "teamId",
+};
+
+const getSeedPoolBiasScore = (player, seed) => {
+  if (!seed || typeof seed?.poolBias !== "function") return 0;
+  const score = toNumber(seed.poolBias(player));
+  return score == null ? 0 : score;
+};
+
+const getPrefillBiasBoost = (prefillBias, attr, group) => {
+  if (!prefillBias || typeof prefillBias !== "object") return 0;
+  const biasAttr = AXIS_TO_ATTR[prefillBias.axis] ?? null;
+  if (!biasAttr || biasAttr !== attr) return 0;
+  if (group == null || prefillBias.groupId == null) return 0;
+  if (String(group) !== String(prefillBias.groupId)) return 0;
+  return Math.max(1, toNumber(prefillBias.strength) ?? 3) * 1000;
+};
+
+const selectGroupForSameCount = (players, attr, required, options = {}) => {
   const groups = new Map();
   for (const player of players) {
     const value = player?.[attr];
@@ -982,12 +1003,14 @@ const selectGroupForSameCount = (players, attr, required) => {
   for (const [group, list] of groups.entries()) {
     if (required != null && list.length < required) continue;
     const avg = computeAverage(list.map((player) => player.rating));
+    const biasBoost = getPrefillBiasBoost(options?.prefillBias, attr, group);
+    const effectiveCount = list.length + biasBoost;
     if (
-      list.length > bestCount ||
-      (list.length === bestCount && avg < bestAvg)
+      effectiveCount > bestCount ||
+      (effectiveCount === bestCount && avg < bestAvg)
     ) {
       bestGroup = group;
-      bestCount = list.length;
+      bestCount = effectiveCount;
       bestAvg = avg;
     }
   }
@@ -1167,6 +1190,7 @@ const prefillPlayers = (
       const check = canAddCandidate(candidate);
       if (!check.ok) continue;
       const preferenceScore = getPreferenceScore(candidate);
+      const seedBiasScore = getSeedPoolBiasScore(candidate, options?.seed);
       const distance = useRatingHint
         ? Math.abs((toNumber(candidate?.rating) ?? 0) - ratingHintPivot)
         : null;
@@ -1177,6 +1201,10 @@ const prefillPlayers = (
           preferenceScore > best.preferenceScore) ||
         (check.penalty === best.penalty &&
           preferenceScore === best.preferenceScore &&
+          seedBiasScore < best.seedBiasScore) ||
+        (check.penalty === best.penalty &&
+          preferenceScore === best.preferenceScore &&
+          seedBiasScore === best.seedBiasScore &&
           (useRatingHint
             ? distance < best.distance ||
               (distance === best.distance &&
@@ -1187,6 +1215,7 @@ const prefillPlayers = (
           player: candidate,
           penalty: check.penalty,
           preferenceScore,
+          seedBiasScore,
           distance: distance ?? 0,
         };
       }
@@ -1219,6 +1248,10 @@ const prefillPlayers = (
       .sort((a, b) => {
         const preferenceDiff = getPreferenceScore(b) - getPreferenceScore(a);
         if (preferenceDiff !== 0) return preferenceDiff;
+        const seedBiasDiff =
+          getSeedPoolBiasScore(a, options?.seed) -
+          getSeedPoolBiasScore(b, options?.seed);
+        if (seedBiasDiff !== 0) return seedBiasDiff;
         if (useRatingHint) {
           const aDistance = Math.abs((toNumber(a?.rating) ?? 0) - ratingHintPivot);
           const bDistance = Math.abs((toNumber(b?.rating) ?? 0) - ratingHintPivot);
@@ -1990,6 +2023,1262 @@ const isPreservationMetricsBetter = (candidate, current, options = {}) => {
   if (candidate.sumRating !== current.sumRating)
     return candidate.sumRating < current.sumRating;
   return false;
+};
+
+const buildRemainingSupplyPenalty = (remaining, emptyWeight, scaleWeight) => {
+  const count = Math.max(0, toNumber(remaining) ?? 0);
+  if (count <= 0) return emptyWeight;
+  return Math.round((scaleWeight * 100) / (count + 1));
+};
+
+const buildSupplyMaps = (pool) => ({
+  club: countByAttr(pool, "teamId"),
+  league: countByAttr(pool, "leagueId"),
+  nation: countByAttr(pool, "nationId"),
+});
+
+const getSolvedSquadValueMetrics = (
+  squad,
+  pool,
+  ratingTarget,
+  options = {},
+) => {
+  const list = Array.isArray(squad) ? squad : [];
+  const target = toNumber(ratingTarget);
+  const pivot =
+    toNumber(options?.pivot) ??
+    (target != null ? Math.max(80, Math.floor(target) - 1) : 84);
+  const requiredInforms = Math.max(0, toNumber(options?.requiredInforms) ?? 0);
+  const requiredSpecials = Math.max(0, toNumber(options?.requiredSpecials) ?? 0);
+  const preservation = getSquadPreservationMetrics(
+    list,
+    target,
+    pivot,
+    requiredInforms,
+    requiredSpecials,
+  );
+  const squadRating = getSquadRating(list);
+  const ratingExcess =
+    target != null ? Math.max(0, squadRating - target) : 0;
+  const tradableCount = list.reduce(
+    (count, player) => (!player?.isUntradeable ? count + 1 : count),
+    0,
+  );
+  const signature = options?.signature ?? null;
+  const composition = buildCompositionSnapshot(list, list.length);
+
+  const supplyMaps = options?.supplyMaps || buildSupplyMaps(pool || []);
+  const squadClubCounts = countByAttr(list, "teamId");
+  const squadLeagueCounts = countByAttr(list, "leagueId");
+  const squadNationCounts = countByAttr(list, "nationId");
+
+  const scarcityPenalty = list.reduce((sum, player) => {
+    if (!player) return sum;
+    const teamId = player?.teamId ?? null;
+    const leagueId = player?.leagueId ?? null;
+    const nationId = player?.nationId ?? null;
+    const remainingClub =
+      teamId == null
+        ? 0
+        : (supplyMaps.club.get(teamId) || 0) - (squadClubCounts.get(teamId) || 0);
+    const remainingLeague =
+      leagueId == null
+        ? 0
+        : (supplyMaps.league.get(leagueId) || 0) -
+          (squadLeagueCounts.get(leagueId) || 0);
+    const remainingNation =
+      nationId == null
+        ? 0
+        : (supplyMaps.nation.get(nationId) || 0) -
+          (squadNationCounts.get(nationId) || 0);
+    return (
+      sum +
+      buildRemainingSupplyPenalty(remainingClub, 500, 6) +
+      buildRemainingSupplyPenalty(remainingLeague, 300, 4) +
+      buildRemainingSupplyPenalty(remainingNation, 200, 3)
+    );
+  }, 0);
+  const requiredLeagueIds = new Set(
+    (signature?.requiredLeagueIds || [])
+      .map((value) => toNumber(value))
+      .filter((value) => value != null),
+  );
+  const requiredNationIds = new Set(
+    (signature?.requiredNationIds || [])
+      .map((value) => toNumber(value))
+      .filter((value) => value != null),
+  );
+  const requiredClubIds = new Set(
+    (signature?.requiredClubIds || [])
+      .map((value) => toNumber(value))
+      .filter((value) => value != null),
+  );
+  const identityBalancePenalty = (() => {
+    if (!signature?.isCompositionPuzzle) return 0;
+    let penalty = 0;
+    if (requiredLeagueIds.size) {
+      const count = list.reduce(
+        (sum, player) => (requiredLeagueIds.has(player?.leagueId) ? sum + 1 : sum),
+        0,
+      );
+      penalty += Math.max(0, list.length - count) * 45;
+    }
+    if (requiredNationIds.size) {
+      const count = list.reduce(
+        (sum, player) => (requiredNationIds.has(player?.nationId) ? sum + 1 : sum),
+        0,
+      );
+      penalty += Math.max(0, list.length - count) * 36;
+    }
+    if (requiredClubIds.size) {
+      const count = list.reduce(
+        (sum, player) => (requiredClubIds.has(player?.teamId) ? sum + 1 : sum),
+        0,
+      );
+      penalty += Math.max(0, list.length - count) * 32;
+    }
+    const dominantAxes = Array.isArray(signature?.dominantAxes)
+      ? signature.dominantAxes
+      : [];
+    if (dominantAxes.includes("league")) {
+      penalty += Math.max(0, (composition?.uniqueLeagues ?? 0) - 1) * 18;
+      penalty += Math.max(
+        0,
+        list.length - (composition?.dominantLeagueCount ?? 0),
+      ) * 8;
+    }
+    if (dominantAxes.includes("nation")) {
+      penalty += Math.max(0, (composition?.uniqueNations ?? 0) - 1) * 12;
+      penalty += Math.max(
+        0,
+        list.length - (composition?.dominantNationCount ?? 0),
+      ) * 6;
+    }
+    if (dominantAxes.includes("club")) {
+      penalty += Math.max(0, (composition?.uniqueClubs ?? 0) - 1) * 4;
+      penalty += Math.max(
+        0,
+        list.length - (composition?.dominantClubCount ?? 0),
+      ) * 2;
+    }
+    return penalty;
+  })();
+
+  return {
+    ratingExcess,
+    maxRating: preservation.maxRating,
+    highRatingScore: preservation.highScore,
+    highRatingCount: preservation.highCount,
+    identityBalancePenalty,
+    specialCount: preservation.specialCount,
+    tradableCount,
+    scarcityPenalty,
+    sumRating: preservation.sumRating,
+    squadRating,
+    preservation,
+  };
+};
+
+const isSolvedSquadValueBetter = (candidate, current) => {
+  if (!candidate || !current) return false;
+  if (candidate.ratingExcess !== current.ratingExcess)
+    return candidate.ratingExcess < current.ratingExcess;
+  if (candidate.maxRating !== current.maxRating)
+    return candidate.maxRating < current.maxRating;
+  if (candidate.highRatingScore !== current.highRatingScore)
+    return candidate.highRatingScore < current.highRatingScore;
+  if (candidate.highRatingCount !== current.highRatingCount)
+    return candidate.highRatingCount < current.highRatingCount;
+  if (candidate.identityBalancePenalty !== current.identityBalancePenalty)
+    return candidate.identityBalancePenalty < current.identityBalancePenalty;
+  if (candidate.sumRating !== current.sumRating)
+    return candidate.sumRating < current.sumRating;
+  if (candidate.specialCount !== current.specialCount)
+    return candidate.specialCount < current.specialCount;
+  if (candidate.tradableCount !== current.tradableCount)
+    return candidate.tradableCount < current.tradableCount;
+  if (candidate.scarcityPenalty !== current.scarcityPenalty)
+    return candidate.scarcityPenalty < current.scarcityPenalty;
+  return false;
+};
+
+const getBalancedRefineBand = (ratingTarget, pivot) => {
+  const target = toNumber(ratingTarget);
+  const pivotNumber =
+    toNumber(pivot) ??
+    (target != null ? Math.max(80, Math.floor(target) - 1) : 84);
+  if (target == null) {
+    return {
+      minRating: Math.max(0, pivotNumber - 6),
+      maxRating: pivotNumber + 1,
+    };
+  }
+  return {
+    minRating: Math.max(0, target - 8),
+    maxRating: target + 1,
+  };
+};
+
+const buildRefinementCandidatePool = (
+  squad,
+  pool,
+  ratingTarget,
+  options = {},
+) => {
+  const working = Array.isArray(squad) ? squad : [];
+  const availablePool = Array.isArray(pool) ? pool : [];
+  const target = toNumber(ratingTarget);
+  const pivot =
+    toNumber(options?.pivot) ??
+    (target != null ? Math.max(80, Math.floor(target) - 1) : 84);
+  const window = Math.max(1, toNumber(options?.window) ?? 6);
+  const maxCandidates = Math.max(30, toNumber(options?.maxCandidates) ?? 140);
+  const usedIds = new Set(
+    working.map((player) => player?.id).filter((id) => id != null),
+  );
+  const supplyMaps = options?.supplyMaps || buildSupplyMaps(availablePool);
+  const clubCounts = countByAttr(working, "teamId");
+  const leagueCounts = countByAttr(working, "leagueId");
+  const nationCounts = countByAttr(working, "nationId");
+
+  const scoreScarcity = (player) => {
+    if (!player) return 0;
+    const teamId = player?.teamId ?? null;
+    const leagueId = player?.leagueId ?? null;
+    const nationId = player?.nationId ?? null;
+    const clubRemaining =
+      teamId == null ? 0 : (supplyMaps.club.get(teamId) || 0) - (clubCounts.get(teamId) || 0);
+    const leagueRemaining =
+      leagueId == null
+        ? 0
+        : (supplyMaps.league.get(leagueId) || 0) - (leagueCounts.get(leagueId) || 0);
+    const nationRemaining =
+      nationId == null
+        ? 0
+        : (supplyMaps.nation.get(nationId) || 0) - (nationCounts.get(nationId) || 0);
+    return (
+      buildRemainingSupplyPenalty(clubRemaining, 500, 6) +
+      buildRemainingSupplyPenalty(leagueRemaining, 300, 4) +
+      buildRemainingSupplyPenalty(nationRemaining, 200, 3)
+    );
+  };
+
+  const scored = availablePool
+    .filter((player) => player && player.id != null)
+    .filter((player) => !usedIds.has(player.id))
+    .map((player) => {
+      const rating = toNumber(player?.rating) ?? 0;
+      return {
+        player,
+        rating,
+        withinWindow: Math.abs(rating - pivot) <= window,
+        distance: Math.abs(rating - pivot),
+        scarcityPenalty: scoreScarcity(player),
+      };
+    });
+
+  const desirabilitySort = (a, b) => {
+    if (a.withinWindow !== b.withinWindow) return a.withinWindow ? -1 : 1;
+    if (a.rating !== b.rating) return a.rating - b.rating;
+    if (Boolean(a.player?.isSpecial) !== Boolean(b.player?.isSpecial))
+      return Boolean(a.player?.isSpecial) ? 1 : -1;
+    if (Boolean(a.player?.isUntradeable) !== Boolean(b.player?.isUntradeable))
+      return Boolean(a.player?.isUntradeable) ? -1 : 1;
+    if (a.scarcityPenalty !== b.scarcityPenalty)
+      return a.scarcityPenalty - b.scarcityPenalty;
+    return 0;
+  };
+
+  const nearPivot = scored.slice().sort(desirabilitySort).slice(0, maxCandidates);
+  const lowRated = scored
+    .slice()
+    .sort((a, b) => {
+      if (a.rating !== b.rating) return a.rating - b.rating;
+      return desirabilitySort(a, b);
+    })
+    .slice(0, Math.min(40, maxCandidates));
+  const combined = [];
+  const seen = new Set();
+  for (const list of [nearPivot, lowRated]) {
+    for (const entry of list) {
+      const id = entry?.player?.id ?? null;
+      if (id == null || seen.has(id)) continue;
+      seen.add(id);
+      combined.push(entry.player);
+      if (combined.length >= maxCandidates) break;
+    }
+    if (combined.length >= maxCandidates) break;
+  }
+  return combined;
+};
+
+const shouldRunBalancedReshape = (metrics, ratingTarget, signature) => {
+  if (!metrics) return false;
+  const target = toNumber(ratingTarget) ?? 0;
+  const compositionPuzzle = Boolean(signature?.isCompositionPuzzle);
+  const maxRatingGap = Math.max(0, (metrics.maxRating ?? 0) - target);
+  const highScore = metrics.highRatingScore ?? 0;
+  const highCount = metrics.highRatingCount ?? 0;
+  if (compositionPuzzle && maxRatingGap >= 3) return true;
+  if (compositionPuzzle && highCount >= 4) return true;
+  if (highScore >= 120) return true;
+  return false;
+};
+
+const buildBalancedReplacementCandidates = (
+  squad,
+  pool,
+  ratingTarget,
+  signature,
+  options = {},
+) => {
+  const working = Array.isArray(squad) ? squad : [];
+  const availablePool = Array.isArray(pool) ? pool : [];
+  const usedIds = new Set(
+    working.map((player) => player?.id).filter((id) => id != null),
+  );
+  const target = toNumber(ratingTarget);
+  const pivot =
+    toNumber(options?.pivot) ??
+    (target != null ? Math.max(80, Math.floor(target) - 1) : 84);
+  const { minRating, maxRating } = getBalancedRefineBand(target, pivot);
+  const dominantLeague = getDominantCountEntry(working, "leagueId");
+  const dominantNation = getDominantCountEntry(working, "nationId");
+  const dominantClub = getDominantCountEntry(working, "teamId");
+  const requiredLeagueIds = new Set(
+    (signature?.requiredLeagueIds || [])
+      .map(toNumber)
+      .filter((value) => value != null),
+  );
+  const requiredNationIds = new Set(
+    (signature?.requiredNationIds || [])
+      .map(toNumber)
+      .filter((value) => value != null),
+  );
+  const requiredClubIds = new Set(
+    (signature?.requiredClubIds || [])
+      .map(toNumber)
+      .filter((value) => value != null),
+  );
+  const maxCandidates = Math.max(20, toNumber(options?.maxCandidates) ?? 48);
+
+  const scored = availablePool
+    .filter((player) => player && player.id != null)
+    .filter((player) => !usedIds.has(player.id))
+    .filter((player) => {
+      const rating = toNumber(player?.rating);
+      if (rating == null) return false;
+      return rating >= minRating && rating <= maxRating;
+    })
+    .map((player) => {
+      const rating = toNumber(player?.rating) ?? 0;
+      let identityScore = 0;
+      if (
+        requiredLeagueIds.size &&
+        player?.leagueId != null &&
+        requiredLeagueIds.has(player.leagueId)
+      ) {
+        identityScore += 8;
+      }
+      if (
+        requiredNationIds.size &&
+        player?.nationId != null &&
+        requiredNationIds.has(player.nationId)
+      ) {
+        identityScore += 7;
+      }
+      if (
+        requiredClubIds.size &&
+        player?.teamId != null &&
+        requiredClubIds.has(player.teamId)
+      ) {
+        identityScore += 7;
+      }
+      if (
+        dominantLeague?.value != null &&
+        String(player?.leagueId ?? "") === String(dominantLeague.value)
+      ) {
+        identityScore += 5;
+      }
+      if (
+        dominantNation?.value != null &&
+        String(player?.nationId ?? "") === String(dominantNation.value)
+      ) {
+        identityScore += 4;
+      }
+      if (
+        dominantClub?.value != null &&
+        String(player?.teamId ?? "") === String(dominantClub.value)
+      ) {
+        identityScore += 2;
+      }
+      return {
+        player,
+        rating,
+        identityScore,
+        distance: Math.abs(rating - pivot),
+      };
+    })
+    .sort((a, b) => {
+      if (b.identityScore !== a.identityScore)
+        return b.identityScore - a.identityScore;
+      if (a.distance !== b.distance) return a.distance - b.distance;
+      if (a.rating !== b.rating) return a.rating - b.rating;
+      if (Boolean(a.player?.isSpecial) !== Boolean(b.player?.isSpecial))
+        return Boolean(a.player?.isSpecial) ? 1 : -1;
+      if (Boolean(a.player?.isUntradeable) !== Boolean(b.player?.isUntradeable))
+        return Boolean(a.player?.isUntradeable) ? -1 : 1;
+      return 0;
+    });
+
+  const combined = [];
+  const seen = new Set();
+  const bestMatches = scored.slice(0, maxCandidates);
+  const lowTail = scored
+    .slice()
+    .sort((a, b) => {
+      if (a.rating !== b.rating) return a.rating - b.rating;
+      return b.identityScore - a.identityScore;
+    })
+    .slice(0, Math.min(18, maxCandidates));
+  for (const list of [bestMatches, lowTail]) {
+    for (const entry of list) {
+      const id = entry?.player?.id ?? null;
+      if (id == null || seen.has(id)) continue;
+      seen.add(id);
+      combined.push(entry.player);
+      if (combined.length >= maxCandidates) break;
+    }
+    if (combined.length >= maxCandidates) break;
+  }
+  return combined;
+};
+
+const refineSolvedSquadLocal = (
+  squad,
+  pool,
+  rules,
+  squadSize,
+  lockedIds,
+  debugPush,
+  options = {},
+) => {
+  if (!Array.isArray(squad) || squad.length < squadSize) {
+    return {
+      squad,
+      changed: false,
+      ran: false,
+      before: null,
+      after: null,
+      singleSwaps: 0,
+      pairEscapes: 0,
+      elapsedMs: 0,
+      chemistry: options?.initialChemistry ?? null,
+    };
+  }
+  const startedAt = Date.now();
+  const timeBudgetMs = Math.max(0, toNumber(options?.timeBudgetMs) ?? 0);
+  const deadlineAt = timeBudgetMs > 0 ? startedAt + timeBudgetMs : null;
+  const isExpired = () => deadlineAt != null && Date.now() >= deadlineAt;
+  const chemistryRequired = Boolean(options?.chemistryRequired);
+  const slotsForChemistry = Array.isArray(options?.slotsForChemistry)
+    ? options.slotsForChemistry
+    : [];
+  if (chemistryRequired && slotsForChemistry.length < squadSize) {
+    return {
+      squad,
+      changed: false,
+      ran: false,
+      before: null,
+      after: null,
+      singleSwaps: 0,
+      pairEscapes: 0,
+      elapsedMs: 0,
+      chemistry: options?.initialChemistry ?? null,
+    };
+  }
+
+  const working = squad.slice(0, squadSize);
+  const locked = lockedIds instanceof Set ? lockedIds : new Set(lockedIds || []);
+  const usedIds = new Set(
+    working.map((player) => player?.id).filter((id) => id != null),
+  );
+  const target = toNumber(options?.ratingTarget);
+  const pivot =
+    toNumber(options?.pivot) ??
+    (target != null ? Math.max(80, Math.floor(target) - 1) : 84);
+  const maxIterations = Math.max(
+    1,
+    toNumber(options?.maxSingleIterations) ?? 20,
+  );
+  const pairCandidateLimit = Math.max(
+    4,
+    toNumber(options?.pairCandidateLimit) ?? 16,
+  );
+  const supplyMaps = options?.supplyMaps || buildSupplyMaps(pool || []);
+
+  const evaluateCandidate = (candidateSquad) => {
+    let chemistry = chemistryRequired
+      ? computeChemistryEval(candidateSquad, slotsForChemistry, squadSize)
+      : null;
+    const evalCtx = {
+      checkChemistry: chemistryRequired,
+      chemistry,
+    };
+    for (const rule of rules || []) {
+      if (!rule) continue;
+      const failing = evaluateRule(rule, candidateSquad, squadSize, evalCtx);
+      if (failing) return null;
+    }
+    return {
+      chemistry,
+      value: getSolvedSquadValueMetrics(candidateSquad, pool, target, {
+        pivot,
+        requiredInforms: options?.requiredInforms ?? 0,
+        requiredSpecials: options?.requiredSpecials ?? 0,
+        supplyMaps,
+        signature: options?.signature ?? null,
+      }),
+    };
+  };
+
+  const initialEval =
+    evaluateCandidate(working) ||
+    (() => {
+      const chemistry = chemistryRequired ? options?.initialChemistry ?? null : null;
+      return {
+        chemistry,
+        value: getSolvedSquadValueMetrics(working, pool, target, {
+          pivot,
+          requiredInforms: options?.requiredInforms ?? 0,
+          requiredSpecials: options?.requiredSpecials ?? 0,
+          supplyMaps,
+          signature: options?.signature ?? null,
+        }),
+      };
+    })();
+
+  let bestEval = initialEval;
+  let changed = false;
+  let singleSwaps = 0;
+  let pairEscapes = 0;
+  const lowImpactMode =
+    (initialEval?.value?.ratingExcess ?? 0) <= 0 &&
+    (initialEval?.value?.highRatingCount ?? 0) <= 1 &&
+    (initialEval?.value?.specialCount ?? 0) <=
+      Math.max(0, toNumber(options?.requiredSpecials) ?? 0);
+  const effectiveMaxIterations = lowImpactMode
+    ? Math.min(maxIterations, 4)
+    : maxIterations;
+  const effectivePairSearchEnabled =
+    options?.pairSearchEnabled !== false && !lowImpactMode;
+  const effectiveMaxCandidates = lowImpactMode
+    ? Math.min(toNumber(options?.maxCandidates) ?? 60, 36)
+    : toNumber(options?.maxCandidates) ?? 60;
+
+  const getWorstIndices = () =>
+    Array.from({ length: working.length }, (_, index) => index)
+      .filter((index) => !locked.has(working[index]?.id))
+      .sort((a, b) => {
+        const playerA = working[a];
+        const playerB = working[b];
+        const ratingA = toNumber(playerA?.rating) ?? 0;
+        const ratingB = toNumber(playerB?.rating) ?? 0;
+        if (ratingA !== ratingB) return ratingB - ratingA;
+        if (Boolean(playerA?.isSpecial) !== Boolean(playerB?.isSpecial))
+          return Boolean(playerA?.isSpecial) ? -1 : 1;
+        if (Boolean(playerA?.isUntradeable) !== Boolean(playerB?.isUntradeable))
+          return Boolean(playerA?.isUntradeable) ? 1 : -1;
+        return 0;
+      })
+      .slice(0, 6);
+
+  for (let iteration = 0; iteration < effectiveMaxIterations; iteration += 1) {
+    if (isExpired()) break;
+    const candidates = buildRefinementCandidatePool(working, pool, target, {
+      pivot,
+      window: options?.window,
+      maxCandidates: effectiveMaxCandidates,
+      supplyMaps,
+    });
+    let bestMove = null;
+
+    for (let index = 0; index < working.length; index += 1) {
+      if (isExpired()) break;
+      const outPlayer = working[index];
+      const outId = outPlayer?.id ?? null;
+      if (outId != null && locked.has(outId)) continue;
+
+      const seenDefs = new Set();
+      for (let j = 0; j < working.length; j += 1) {
+        if (j === index) continue;
+        const defKey = getDefinitionKey(working[j]);
+        if (defKey == null) continue;
+        seenDefs.add(String(defKey));
+      }
+
+      for (const candidate of candidates) {
+        if (isExpired()) break;
+        if (!candidate || candidate.id == null) continue;
+        if (usedIds.has(candidate.id)) continue;
+        const candidateDef = getDefinitionKey(candidate);
+        if (candidateDef != null && seenDefs.has(String(candidateDef))) continue;
+
+        const nextSquad = working.slice();
+        nextSquad[index] = candidate;
+        const nextEval = evaluateCandidate(nextSquad);
+        if (!nextEval) continue;
+        if (!isSolvedSquadValueBetter(nextEval.value, bestEval.value)) continue;
+        if (
+          !bestMove ||
+          isSolvedSquadValueBetter(nextEval.value, bestMove.eval.value)
+        ) {
+          bestMove = {
+            kind: "single",
+            index,
+            outPlayer,
+            inPlayer: candidate,
+            eval: nextEval,
+          };
+        }
+      }
+    }
+
+    if (!bestMove && effectivePairSearchEnabled && !isExpired()) {
+      const worstIndices = getWorstIndices();
+      const pairCandidates = candidates.slice(0, pairCandidateLimit);
+      for (let a = 0; a < worstIndices.length && !isExpired(); a += 1) {
+        for (
+          let b = a + 1;
+          b < worstIndices.length && !isExpired();
+          b += 1
+        ) {
+          const outAIndex = worstIndices[a];
+          const outBIndex = worstIndices[b];
+          const outA = working[outAIndex];
+          const outB = working[outBIndex];
+          if (!outA || !outB) continue;
+
+          const seenDefs = new Set();
+          for (let k = 0; k < working.length; k += 1) {
+            if (k === outAIndex || k === outBIndex) continue;
+            const defKey = getDefinitionKey(working[k]);
+            if (defKey == null) continue;
+            seenDefs.add(String(defKey));
+          }
+
+          for (let i = 0; i < pairCandidates.length && !isExpired(); i += 1) {
+            const inA = pairCandidates[i];
+            if (!inA || inA.id == null || usedIds.has(inA.id)) continue;
+            const inADef = getDefinitionKey(inA);
+            if (inADef != null && seenDefs.has(String(inADef))) continue;
+
+            for (
+              let j = i + 1;
+              j < pairCandidates.length && !isExpired();
+              j += 1
+            ) {
+              const inB = pairCandidates[j];
+              if (!inB || inB.id == null || usedIds.has(inB.id)) continue;
+              if (inB.id === inA.id) continue;
+              const inBDef = getDefinitionKey(inB);
+              if (inBDef != null && seenDefs.has(String(inBDef))) continue;
+              if (
+                inADef != null &&
+                inBDef != null &&
+                String(inADef) === String(inBDef)
+              ) {
+                continue;
+              }
+
+              const nextSquad = working.slice();
+              nextSquad[outAIndex] = inA;
+              nextSquad[outBIndex] = inB;
+              const nextEval = evaluateCandidate(nextSquad);
+              if (!nextEval) continue;
+              if (!isSolvedSquadValueBetter(nextEval.value, bestEval.value))
+                continue;
+              if (
+                !bestMove ||
+                isSolvedSquadValueBetter(nextEval.value, bestMove.eval.value)
+              ) {
+                bestMove = {
+                  kind: "pair",
+                  outAIndex,
+                  outBIndex,
+                  outA,
+                  outB,
+                  inA,
+                  inB,
+                  eval: nextEval,
+                };
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (!bestMove) break;
+
+    if (bestMove.kind === "pair") {
+      working[bestMove.outAIndex] = bestMove.inA;
+      working[bestMove.outBIndex] = bestMove.inB;
+      if (bestMove.outA?.id != null) usedIds.delete(bestMove.outA.id);
+      if (bestMove.outB?.id != null) usedIds.delete(bestMove.outB.id);
+      if (bestMove.inA?.id != null) usedIds.add(bestMove.inA.id);
+      if (bestMove.inB?.id != null) usedIds.add(bestMove.inB.id);
+      pairEscapes += 1;
+      debugPush?.({
+        stage: "refine",
+        action: "swap_pair",
+        outIds: [bestMove.outA?.id ?? null, bestMove.outB?.id ?? null],
+        inIds: [bestMove.inA?.id ?? null, bestMove.inB?.id ?? null],
+        metrics: bestMove.eval.value,
+      });
+    } else {
+      working[bestMove.index] = bestMove.inPlayer;
+      if (bestMove.outPlayer?.id != null) usedIds.delete(bestMove.outPlayer.id);
+      if (bestMove.inPlayer?.id != null) usedIds.add(bestMove.inPlayer.id);
+      singleSwaps += 1;
+      debugPush?.({
+        stage: "refine",
+        action: "swap",
+        outId: bestMove.outPlayer?.id ?? null,
+        inId: bestMove.inPlayer?.id ?? null,
+        metrics: bestMove.eval.value,
+      });
+    }
+
+    bestEval = bestMove.eval;
+    changed = true;
+  }
+
+  const elapsedMs = Date.now() - startedAt;
+  debugPush?.({
+    stage: "refine",
+    action: "summary",
+    ran: true,
+    changed,
+    singleSwaps,
+    pairEscapes,
+    elapsedMs,
+    before: initialEval?.value ?? null,
+    after: bestEval?.value ?? initialEval?.value ?? null,
+  });
+
+  return {
+    squad: changed ? working : squad,
+    changed,
+    ran: true,
+    before: initialEval?.value ?? null,
+    after: bestEval?.value ?? initialEval?.value ?? null,
+    singleSwaps,
+    pairEscapes,
+    elapsedMs,
+    chemistry: bestEval?.chemistry ?? options?.initialChemistry ?? null,
+  };
+};
+
+const refineSolvedSquadBalancedReshape = (
+  squad,
+  pool,
+  rules,
+  squadSize,
+  lockedIds,
+  debugPush,
+  options = {},
+) => {
+  if (!Array.isArray(squad) || squad.length < squadSize) {
+    return {
+      squad,
+      changed: false,
+      ran: false,
+      triggerReason: null,
+      before: null,
+      after: null,
+      candidatesEvaluated: 0,
+      elapsedMs: 0,
+      chemistry: options?.initialChemistry ?? null,
+    };
+  }
+  const startedAt = Date.now();
+  const timeBudgetMs = Math.max(0, toNumber(options?.timeBudgetMs) ?? 0);
+  const deadlineAt = timeBudgetMs > 0 ? startedAt + timeBudgetMs : null;
+  const isExpired = () => deadlineAt != null && Date.now() >= deadlineAt;
+  const chemistryRequired = Boolean(options?.chemistryRequired);
+  const slotsForChemistry = Array.isArray(options?.slotsForChemistry)
+    ? options.slotsForChemistry
+    : [];
+  if (chemistryRequired && slotsForChemistry.length < squadSize) {
+    return {
+      squad,
+      changed: false,
+      ran: false,
+      triggerReason: null,
+      before: null,
+      after: null,
+      candidatesEvaluated: 0,
+      elapsedMs: 0,
+      chemistry: options?.initialChemistry ?? null,
+    };
+  }
+
+  const working = squad.slice(0, squadSize);
+  const locked = lockedIds instanceof Set ? lockedIds : new Set(lockedIds || []);
+  const target = toNumber(options?.ratingTarget);
+  const pivot =
+    toNumber(options?.pivot) ??
+    (target != null ? Math.max(80, Math.floor(target) - 1) : 84);
+  const signature = options?.signature ?? null;
+  const supplyMaps = options?.supplyMaps || buildSupplyMaps(pool || []);
+
+  const evaluateCandidate = (candidateSquad) => {
+    const chemistry = chemistryRequired
+      ? computeChemistryEval(candidateSquad, slotsForChemistry, squadSize)
+      : null;
+    const evalCtx = {
+      checkChemistry: chemistryRequired,
+      chemistry,
+    };
+    for (const rule of rules || []) {
+      if (!rule) continue;
+      const failing = evaluateRule(rule, candidateSquad, squadSize, evalCtx);
+      if (failing) return null;
+    }
+    return {
+      chemistry,
+      value: getSolvedSquadValueMetrics(candidateSquad, pool, target, {
+        pivot,
+        requiredInforms: options?.requiredInforms ?? 0,
+        requiredSpecials: options?.requiredSpecials ?? 0,
+        supplyMaps,
+        signature: options?.signature ?? null,
+      }),
+    };
+  };
+
+  const initialEval =
+    evaluateCandidate(working) ||
+    (() => ({
+      chemistry: chemistryRequired ? options?.initialChemistry ?? null : null,
+      value: getSolvedSquadValueMetrics(working, pool, target, {
+        pivot,
+        requiredInforms: options?.requiredInforms ?? 0,
+        requiredSpecials: options?.requiredSpecials ?? 0,
+        supplyMaps,
+        signature: options?.signature ?? null,
+      }),
+    }))();
+
+  const triggerReason = shouldRunBalancedReshape(
+    initialEval?.value,
+    target,
+    signature,
+  )
+    ? "anchor_heavy"
+    : null;
+  if (!triggerReason) {
+    return {
+      squad,
+      changed: false,
+      ran: false,
+      triggerReason: null,
+      before: initialEval?.value ?? null,
+      after: initialEval?.value ?? null,
+      candidatesEvaluated: 0,
+      elapsedMs: 0,
+      chemistry: initialEval?.chemistry ?? options?.initialChemistry ?? null,
+    };
+  }
+
+  const candidatePool = buildBalancedReplacementCandidates(
+    working,
+    pool,
+    target,
+    signature,
+    {
+      pivot,
+      maxCandidates: options?.maxCandidates ?? 72,
+    },
+  );
+  if (!candidatePool.length) {
+    return {
+      squad,
+      changed: false,
+      ran: true,
+      triggerReason,
+      before: initialEval?.value ?? null,
+      after: initialEval?.value ?? null,
+      candidatesEvaluated: 0,
+      elapsedMs: Date.now() - startedAt,
+      chemistry: initialEval?.chemistry ?? options?.initialChemistry ?? null,
+    };
+  }
+
+  const getPlayerPosNames = (player) => {
+    const alt = Array.isArray(player?.alternativePositionNames)
+      ? player.alternativePositionNames
+      : [];
+    if (alt.length) return alt.map((name) => String(name));
+    const preferred = player?.preferredPositionName ?? null;
+    return preferred == null ? [] : [String(preferred)];
+  };
+  const getSlotPosName = (index) => {
+    const slot = slotsForChemistry[index] ?? null;
+    const name = slot?.positionName ?? slot?.position ?? null;
+    return name == null ? null : String(name);
+  };
+  const isPlayableAtIndex = (player, index) => {
+    if (!chemistryRequired) return true;
+    const slotName = getSlotPosName(index);
+    if (!slotName) return true;
+    const posNames = getPlayerPosNames(player);
+    return posNames.includes(slotName);
+  };
+  const composition = buildCompositionSnapshot(working, squadSize);
+  const requiredLeagueIds = new Set(
+    (signature?.requiredLeagueIds || [])
+      .map((value) => toNumber(value))
+      .filter((value) => value != null),
+  );
+  const requiredNationIds = new Set(
+    (signature?.requiredNationIds || [])
+      .map((value) => toNumber(value))
+      .filter((value) => value != null),
+  );
+  const requiredClubIds = new Set(
+    (signature?.requiredClubIds || [])
+      .map((value) => toNumber(value))
+      .filter((value) => value != null),
+  );
+  const dominantAxes = new Set(
+    Array.isArray(signature?.dominantAxes) ? signature.dominantAxes : [],
+  );
+  const perPlayerChem = Array.isArray(initialEval?.chemistry?.perPlayerChem)
+    ? initialEval.chemistry.perPlayerChem
+    : [];
+  const potentialByPlayer = Array.isArray(initialEval?.chemistry?.potentialByPlayer)
+    ? initialEval.chemistry.potentialByPlayer
+    : [];
+  const rateReplaceable = (index) => {
+    const player = working[index];
+    if (!player) return -Infinity;
+    const rating = toNumber(player?.rating) ?? 0;
+    const effectiveTarget =
+      target != null ? target : toNumber(initialEval?.value?.squadRating) ?? pivot;
+    let score = rating * 8;
+    score += Math.max(0, rating - effectiveTarget) * 35;
+    if (Boolean(player?.isSpecial)) score += 28;
+    if (!player?.isUntradeable) score += 18;
+    if (!isPlayableAtIndex(player, index)) score += 45;
+    const chemAtIndex = toNumber(perPlayerChem[index]) ?? 0;
+    score += Math.max(0, 3 - chemAtIndex) * 12;
+    const potentialAtIndex = toNumber(potentialByPlayer[index]) ?? 0;
+    score += Math.max(0, 2 - potentialAtIndex) * 6;
+    if (requiredLeagueIds.size && !requiredLeagueIds.has(player?.leagueId)) score += 42;
+    if (requiredNationIds.size && !requiredNationIds.has(player?.nationId)) score += 36;
+    if (requiredClubIds.size && !requiredClubIds.has(player?.teamId)) score += 36;
+    if (
+      dominantAxes.has("league") &&
+      composition?.dominantLeague != null &&
+      player?.leagueId !== composition.dominantLeague
+    ) {
+      score += 22;
+    }
+    if (
+      dominantAxes.has("nation") &&
+      composition?.dominantNation != null &&
+      player?.nationId !== composition.dominantNation
+    ) {
+      score += 18;
+    }
+    if (
+      dominantAxes.has("club") &&
+      composition?.dominantClub != null &&
+      player?.teamId !== composition.dominantClub
+    ) {
+      score += 14;
+    }
+    return score;
+  };
+
+  const scoredReplaceables = Array.from(
+    { length: working.length },
+    (_, index) => index,
+  )
+    .filter((index) => !locked.has(working[index]?.id))
+    .map((index) => ({
+      index,
+      score: rateReplaceable(index),
+      rating: toNumber(working[index]?.rating) ?? 0,
+    }))
+    .sort((a, b) => {
+      if (a.score !== b.score) return b.score - a.score;
+      return b.rating - a.rating;
+    });
+  const lowRatedReplaceables = scoredReplaceables
+    .slice()
+    .sort((a, b) => a.rating - b.rating)
+    .slice(0, 3);
+  const replacementPool = [];
+  const replacementSeen = new Set();
+  for (const entry of [...scoredReplaceables.slice(0, 6), ...lowRatedReplaceables]) {
+    if (!entry || replacementSeen.has(entry.index)) continue;
+    replacementSeen.add(entry.index);
+    replacementPool.push(entry.index);
+  }
+
+  const replacementSets = [];
+  const replacementSetKeys = new Set();
+  const pushReplacementSet = (indices) => {
+    if (!Array.isArray(indices) || indices.length < 3) return;
+    const normalized = indices.slice().sort((a, b) => a - b);
+    const key = normalized.join(",");
+    if (replacementSetKeys.has(key)) return;
+    replacementSetKeys.add(key);
+    replacementSets.push(normalized);
+  };
+  const buildReplacementCombos = (
+    sourceIndices,
+    size,
+    start = 0,
+    acc = [],
+    limit = 18,
+  ) => {
+    if (replacementSets.length >= limit) return;
+    if (acc.length >= size) {
+      pushReplacementSet(acc);
+      return;
+    }
+    for (let i = start; i < sourceIndices.length; i += 1) {
+      acc.push(sourceIndices[i]);
+      buildReplacementCombos(sourceIndices, size, i + 1, acc, limit);
+      acc.pop();
+      if (replacementSets.length >= limit) return;
+    }
+  };
+  for (const size of [3, 4]) {
+    if (replacementPool.length >= size) {
+      buildReplacementCombos(replacementPool, size);
+    }
+  }
+  if (replacementPool.length >= 5) {
+    pushReplacementSet(replacementPool.slice(0, 5));
+  }
+
+  let bestEval = initialEval;
+  let bestSquad = working;
+  let candidatesEvaluated = 0;
+  const maxEvaluations = Math.max(
+    40,
+    toNumber(options?.maxEvaluations) ?? 220,
+  );
+
+  for (const replaceIndices of replacementSets) {
+    if (isExpired()) break;
+    const perSlotLimit =
+      replaceIndices.length >= 5 ? 3 : replaceIndices.length === 4 ? 4 : 6;
+    const slotCandidates = replaceIndices.map((index) => {
+      const outPlayer = working[index];
+      const seenDefs = new Set();
+      for (let j = 0; j < working.length; j += 1) {
+        if (j === index) continue;
+        const defKey = getDefinitionKey(working[j]);
+        if (defKey == null) continue;
+        seenDefs.add(String(defKey));
+      }
+      const filtered = candidatePool
+        .filter((candidate) => {
+          if (!candidate || candidate.id == null) return false;
+          if (candidate.id === outPlayer?.id) return false;
+          const defKey = getDefinitionKey(candidate);
+          if (defKey != null && seenDefs.has(String(defKey))) return false;
+          return true;
+        });
+      const playable = filtered.filter((candidate) =>
+        isPlayableAtIndex(candidate, index),
+      );
+      return (playable.length ? playable : filtered).slice(0, perSlotLimit);
+    });
+
+    const trial = working.slice();
+    const usedIds = new Set(
+      working
+        .map((player) => player?.id)
+        .filter((id) => id != null),
+    );
+    const usedDefs = new Set(
+      working
+        .map((player) => getDefinitionKey(player))
+        .filter((value) => value != null)
+        .map((value) => String(value)),
+    );
+    for (const index of replaceIndices) {
+      usedIds.delete(trial[index]?.id);
+      const defKey = getDefinitionKey(trial[index]);
+      if (defKey != null) usedDefs.delete(String(defKey));
+    }
+
+    const assignReplacement = (depth = 0) => {
+      if (isExpired()) return;
+      if (candidatesEvaluated >= maxEvaluations) return;
+      if (depth >= replaceIndices.length) {
+        candidatesEvaluated += 1;
+        const nextEval = evaluateCandidate(trial);
+        if (!nextEval) return;
+        if (isSolvedSquadValueBetter(nextEval.value, bestEval.value)) {
+          bestEval = nextEval;
+          bestSquad = trial.slice();
+        }
+        return;
+      }
+
+      const slotIndex = replaceIndices[depth];
+      const previous = trial[slotIndex];
+      for (const candidate of slotCandidates[depth]) {
+        if (isExpired()) return;
+        if (!candidate || candidate.id == null) continue;
+        if (usedIds.has(candidate.id)) continue;
+        const defKey = getDefinitionKey(candidate);
+        if (defKey != null && usedDefs.has(String(defKey))) continue;
+
+        trial[slotIndex] = candidate;
+        usedIds.add(candidate.id);
+        if (defKey != null) usedDefs.add(String(defKey));
+        assignReplacement(depth + 1);
+        usedIds.delete(candidate.id);
+        if (defKey != null) usedDefs.delete(String(defKey));
+        trial[slotIndex] = previous;
+
+        if (candidatesEvaluated >= maxEvaluations) return;
+      }
+    };
+
+    assignReplacement(0);
+  }
+
+  const changed =
+    bestSquad !== working &&
+    isSolvedSquadValueBetter(bestEval?.value, initialEval?.value);
+  const elapsedMs = Date.now() - startedAt;
+  debugPush?.({
+    stage: "refine",
+    action: "balanced_reshape_summary",
+    ran: true,
+    triggerReason,
+    changed,
+    candidatesEvaluated,
+    elapsedMs,
+    before: initialEval?.value ?? null,
+    after: bestEval?.value ?? initialEval?.value ?? null,
+  });
+
+  return {
+    squad: changed ? bestSquad : squad,
+    changed,
+    ran: true,
+    triggerReason,
+    before: initialEval?.value ?? null,
+    after: bestEval?.value ?? initialEval?.value ?? null,
+    candidatesEvaluated,
+    elapsedMs,
+    chemistry: bestEval?.chemistry ?? options?.initialChemistry ?? null,
+  };
+};
+
+const refineSolvedSquad = (
+  squad,
+  pool,
+  rules,
+  squadSize,
+  lockedIds,
+  debugPush,
+  options = {},
+) => {
+  const localBudget = Math.max(
+    0,
+    toNumber(options?.localTimeBudgetMs) ??
+      Math.floor((toNumber(options?.timeBudgetMs) ?? 0) * 0.45),
+  );
+  const reshapeBudget = Math.max(
+    0,
+    toNumber(options?.reshapeTimeBudgetMs) ??
+      Math.floor((toNumber(options?.timeBudgetMs) ?? 0) * 0.55),
+  );
+  const reshapeEnabled = options?.balancedReshapeEnabled === true;
+  const local = refineSolvedSquadLocal(
+    squad,
+    pool,
+    rules,
+    squadSize,
+    lockedIds,
+    debugPush,
+    {
+      ...options,
+      timeBudgetMs: localBudget,
+    },
+  );
+  const baseSquad = local?.changed ? local.squad : squad;
+  const baseChemistry =
+    local?.changed
+      ? local?.chemistry ?? options?.initialChemistry ?? null
+      : options?.initialChemistry ?? null;
+  const reshape = reshapeEnabled
+    ? refineSolvedSquadBalancedReshape(
+        baseSquad,
+        pool,
+        rules,
+        squadSize,
+        lockedIds,
+        debugPush,
+        {
+          ...options,
+          initialChemistry: baseChemistry,
+          timeBudgetMs: reshapeBudget,
+        },
+      )
+    : {
+        squad: baseSquad,
+        changed: false,
+        ran: false,
+        triggerReason: null,
+        before: null,
+        after: null,
+        candidatesEvaluated: 0,
+        elapsedMs: 0,
+        chemistry: baseChemistry,
+      };
+  const changed = Boolean(local?.changed) || Boolean(reshape?.changed);
+  const finalSquad = reshape?.changed
+    ? reshape.squad
+    : local?.changed
+      ? local.squad
+      : squad;
+  const finalChemistry =
+    reshape?.changed
+      ? reshape?.chemistry ?? baseChemistry
+      : local?.changed
+        ? local?.chemistry ?? options?.initialChemistry ?? null
+        : options?.initialChemistry ?? null;
+  return {
+    squad: finalSquad,
+    changed,
+    ran: Boolean(local?.ran) || Boolean(reshape?.ran),
+    before: local?.before ?? null,
+    after:
+      (reshape?.ran ? reshape?.after : null) ??
+      (local?.ran ? local?.after : null) ??
+      null,
+    singleSwaps: local?.singleSwaps ?? 0,
+    pairEscapes: local?.pairEscapes ?? 0,
+    reshapeTriggered: Boolean(reshape?.ran && reshape?.triggerReason),
+    reshapeReason: reshape?.triggerReason ?? null,
+    reshapeChanged: Boolean(reshape?.changed),
+    reshapeCandidatesEvaluated: reshape?.candidatesEvaluated ?? 0,
+    elapsedMs: (local?.elapsedMs ?? 0) + (reshape?.elapsedMs ?? 0),
+    chemistry: finalChemistry,
+  };
 };
 
 const optimizeSquadForPreservation = (
@@ -3702,6 +4991,9 @@ const isOnlyChemistryFailing = (failingRequirements) => {
   return failing.length > 0;
 };
 
+const DEFAULT_RESTART_TIME_BUDGET_MS = 8000;
+const WINNING_SEED_CACHE = new Map();
+
 export const getSquadAverageRating = (players) => {
   const list = Array.isArray(players) ? players : [];
   let sum = 0;
@@ -3746,7 +5038,887 @@ export const getSquadRating = (players) => {
   return base;
 };
 
-export const solveSquad = (context) => {
+const buildCountsMap = (players, attr) => {
+  const map = new Map();
+  for (const player of players || []) {
+    const value = player?.[attr];
+    if (value == null) continue;
+    map.set(value, (map.get(value) || 0) + 1);
+  }
+  return map;
+};
+
+const getDominantCountEntry = (players, attr) => {
+  const counts = buildCountsMap(players, attr);
+  let value = null;
+  let count = 0;
+  for (const [nextValue, nextCount] of counts.entries()) {
+    if (nextCount > count) {
+      value = nextValue;
+      count = nextCount;
+    }
+  }
+  return { value, count, counts };
+};
+
+const isRareNonSpecialPlayer = (player) => {
+  if (!player || player.isSpecial) return false;
+  const rarity = normalizeString(player?.rarityName);
+  if (rarity?.includes("rare")) return true;
+  const rarityId = toNumber(player?.rarityId);
+  return rarityId != null ? rarityId >= 1 : false;
+};
+
+const buildCompositionSnapshot = (players, squadSize = null) => {
+  const list = Array.isArray(players) ? players : [];
+  const n = Math.max(0, toNumber(squadSize) ?? list.length);
+  const squad = list.slice(0, n || list.length);
+  const leagues = getDominantCountEntry(squad, "leagueId");
+  const nations = getDominantCountEntry(squad, "nationId");
+  const clubs = getDominantCountEntry(squad, "teamId");
+  return {
+    size: squad.length,
+    uniqueLeagues: leagues.counts.size,
+    uniqueNations: nations.counts.size,
+    uniqueClubs: clubs.counts.size,
+    dominantLeague: leagues.value,
+    dominantLeagueCount: leagues.count,
+    dominantNation: nations.value,
+    dominantNationCount: nations.count,
+    dominantClub: clubs.value,
+    dominantClubCount: clubs.count,
+    specialCount: squad.filter((player) => Boolean(player?.isSpecial)).length,
+    rareCount: squad.filter((player) => isRareNonSpecialPlayer(player)).length,
+  };
+};
+
+const buildChallengeSignature = (rules, squadSize) => {
+  const list = Array.isArray(rules) ? rules : [];
+  const chemistryTargets = getChemistryRequirementTargets(list, squadSize);
+  const ratingRequirement = getTeamRatingTarget(list);
+  const signature = {
+    hasChemistry:
+      chemistryTargets?.total != null || chemistryTargets?.minEach != null,
+    totalChemistryTarget: chemistryTargets?.total ?? null,
+    minPlayerChemistryTarget: chemistryTargets?.minEach ?? null,
+    ratingTarget: ratingRequirement?.target ?? null,
+    hasSameLeagueMin: false,
+    hasSameNationMin: false,
+    hasSameClubMin: false,
+    sameLeagueMin: null,
+    sameNationMin: null,
+    sameClubMin: null,
+    sameLeagueMax: null,
+    sameNationMax: null,
+    sameClubMax: null,
+    requiredLeagueIds: [],
+    requiredNationIds: [],
+    requiredClubIds: [],
+    hasRareRequirement: false,
+    rareTarget: null,
+    hasInformRequirement: false,
+    isCompositionPuzzle: false,
+    dominantAxes: [],
+  };
+  const requiredLeagueIds = new Set();
+  const requiredNationIds = new Set();
+  const requiredClubIds = new Set();
+  for (const rule of list) {
+    if (!rule) continue;
+    const required = getRuleCount(rule, squadSize);
+    if (rule.type === "same_league_count") {
+      if (rule.op === "min" || rule.op === "exact") {
+        signature.hasSameLeagueMin = true;
+        if (required != null) {
+          signature.sameLeagueMin = Math.max(signature.sameLeagueMin ?? 0, required);
+        }
+      }
+      if ((rule.op === "max" || rule.op === "exact") && required != null) {
+        signature.sameLeagueMax =
+          signature.sameLeagueMax == null
+            ? required
+            : Math.min(signature.sameLeagueMax, required);
+      }
+      continue;
+    }
+    if (rule.type === "same_nation_count") {
+      if (rule.op === "min" || rule.op === "exact") {
+        signature.hasSameNationMin = true;
+        if (required != null) {
+          signature.sameNationMin = Math.max(signature.sameNationMin ?? 0, required);
+        }
+      }
+      if ((rule.op === "max" || rule.op === "exact") && required != null) {
+        signature.sameNationMax =
+          signature.sameNationMax == null
+            ? required
+            : Math.min(signature.sameNationMax, required);
+      }
+      continue;
+    }
+    if (rule.type === "same_club_count") {
+      if (rule.op === "min" || rule.op === "exact") {
+        signature.hasSameClubMin = true;
+        if (required != null) {
+          signature.sameClubMin = Math.max(signature.sameClubMin ?? 0, required);
+        }
+      }
+      if ((rule.op === "max" || rule.op === "exact") && required != null) {
+        signature.sameClubMax =
+          signature.sameClubMax == null
+            ? required
+            : Math.min(signature.sameClubMax, required);
+      }
+      continue;
+    }
+    if (rule.type === "league_id" && (rule.op === "min" || rule.op === "exact")) {
+      for (const value of rule.values || []) {
+        const numeric = toNumber(value);
+        if (numeric != null) requiredLeagueIds.add(numeric);
+      }
+      continue;
+    }
+    if (rule.type === "nation_id" && (rule.op === "min" || rule.op === "exact")) {
+      for (const value of rule.values || []) {
+        const numeric = toNumber(value);
+        if (numeric != null) requiredNationIds.add(numeric);
+      }
+      continue;
+    }
+    if (rule.type === "club_id" && (rule.op === "min" || rule.op === "exact")) {
+      for (const value of rule.values || []) {
+        const numeric = toNumber(value);
+        if (numeric != null) requiredClubIds.add(numeric);
+      }
+      continue;
+    }
+    if (
+      rule.type === "player_rarity" ||
+      rule.type === "player_rarity_group" ||
+      rule.type === "player_rarity_or_totw"
+    ) {
+      signature.hasRareRequirement = true;
+      if (required != null) {
+        signature.rareTarget = Math.max(signature.rareTarget ?? 0, required);
+      }
+      continue;
+    }
+    if (rule.type === "player_inform") {
+      signature.hasInformRequirement = true;
+    }
+  }
+  signature.requiredLeagueIds = Array.from(requiredLeagueIds);
+  signature.requiredNationIds = Array.from(requiredNationIds);
+  signature.requiredClubIds = Array.from(requiredClubIds);
+  if (signature.hasSameLeagueMin || signature.requiredLeagueIds.length) {
+    signature.dominantAxes.push("league");
+  }
+  if (signature.hasSameNationMin || signature.requiredNationIds.length) {
+    signature.dominantAxes.push("nation");
+  }
+  if (signature.hasSameClubMin || signature.requiredClubIds.length) {
+    signature.dominantAxes.push("club");
+  }
+  signature.isCompositionPuzzle = Boolean(
+    signature.hasChemistry &&
+      (
+        signature.hasSameLeagueMin ||
+        signature.hasSameNationMin ||
+        signature.hasSameClubMin ||
+        signature.requiredLeagueIds.length ||
+        signature.requiredNationIds.length ||
+        signature.requiredClubIds.length ||
+        signature.sameClubMax != null ||
+        (signature.totalChemistryTarget != null &&
+          signature.totalChemistryTarget >= 28)
+      ),
+  );
+  signature.fingerprint = JSON.stringify({
+    chemistry: [
+      signature.totalChemistryTarget,
+      signature.minPlayerChemistryTarget,
+    ],
+    ratingTarget: signature.ratingTarget,
+    sameLeagueMin: signature.sameLeagueMin,
+    sameNationMin: signature.sameNationMin,
+    sameClubMin: signature.sameClubMin,
+    sameLeagueMax: signature.sameLeagueMax,
+    sameNationMax: signature.sameNationMax,
+    sameClubMax: signature.sameClubMax,
+    requiredLeagueIds: signature.requiredLeagueIds.slice().sort((a, b) => a - b),
+    requiredNationIds: signature.requiredNationIds.slice().sort((a, b) => a - b),
+    requiredClubIds: signature.requiredClubIds.slice().sort((a, b) => a - b),
+    hasRareRequirement: signature.hasRareRequirement,
+    rareTarget: signature.rareTarget,
+    hasInformRequirement: signature.hasInformRequirement,
+    dominantAxes: signature.dominantAxes,
+  });
+  return signature;
+};
+
+const getBaselinePhaseConfig = (baseConfig = {}) => {
+  const base = baseConfig && typeof baseConfig === "object" ? baseConfig : {};
+  return {
+    id: "baseline",
+    optimize: {
+      ...base,
+      refineBalancedReshape: false,
+    },
+  };
+};
+
+const getPhaseConfig = (signature, baseConfig = {}) => {
+  const base = baseConfig && typeof baseConfig === "object" ? baseConfig : {};
+  if (!signature?.isCompositionPuzzle) {
+    return {
+      id: "default",
+      optimize: {
+        ...base,
+        refineSolvedSquad: false,
+        refineBalancedReshape: false,
+      },
+    };
+  }
+  return {
+    id: "composition",
+    optimize: {
+      ...base,
+      preserveHighCards: false,
+      preserveMaxIterations: Math.min(
+        toNumber(base.preserveMaxIterations) ?? 30,
+        0,
+      ),
+      chemMaxIterations: Math.max(toNumber(base.chemMaxIterations) ?? 60, 75),
+      chemExtendedMaxIterations: Math.max(
+        toNumber(base.chemExtendedMaxIterations) ?? 120,
+        140,
+      ),
+      chemEscapeDepth: Math.max(toNumber(base.chemEscapeDepth) ?? 3, 4),
+      chemTimeBudgetMs: Math.max(toNumber(base.chemTimeBudgetMs) ?? 0, 1500),
+      chemExtendedShortfallThreshold: Math.max(
+        toNumber(base.chemExtendedShortfallThreshold) ?? 2,
+        4,
+      ),
+      refineSolvedSquad: false,
+      refineBalancedReshape: false,
+    },
+  };
+};
+
+const buildSeedKey = (seed) =>
+  JSON.stringify({
+    type: seed?.type ?? "baseline",
+    axis: seed?.axis ?? null,
+    groupId: seed?.groupId ?? null,
+    tier: seed?.tier ?? 0,
+    filter: Boolean(seed?.poolFilter),
+  });
+
+const createSeedDescriptor = ({
+  type = "baseline",
+  axis = null,
+  groupId = null,
+  label = "Baseline",
+  strength = 3,
+  poolFilter = null,
+  tier = 0,
+}) => {
+  const attr = axis ? AXIS_TO_ATTR[axis] ?? null : null;
+  const biasMagnitude = Math.max(1, toNumber(strength) ?? 3) * 100;
+  return {
+    type,
+    axis,
+    groupId,
+    label,
+    tier,
+    poolBias:
+      attr && groupId != null
+        ? (player) =>
+            String(player?.[attr] ?? "") === String(groupId)
+              ? -biasMagnitude
+              : 0
+        : null,
+    prefillBias:
+      attr && groupId != null
+        ? { axis, groupId, strength: Math.max(1, toNumber(strength) ?? 3) }
+        : null,
+    poolFilter: typeof poolFilter === "function" ? poolFilter : null,
+  };
+};
+
+const dedupeSeeds = (seeds) => {
+  const seen = new Set();
+  const list = [];
+  for (const seed of seeds || []) {
+    const key = buildSeedKey(seed);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    list.push(seed);
+  }
+  return list;
+};
+
+const scoreGroupSeed = (players, axis, groupId, signature, context, squadSize) => {
+  const attr = AXIS_TO_ATTR[axis] ?? null;
+  if (!attr || groupId == null) return null;
+  const groupPlayers = (players || []).filter(
+    (player) => String(player?.[attr] ?? "") === String(groupId),
+  );
+  if (!groupPlayers.length) return null;
+  const positions = new Set();
+  const requiredPositions = extractRequiredPositionSet(context?.squadSlots, squadSize);
+  for (const player of groupPlayers) {
+    const posNames = Array.isArray(player?.alternativePositionNames)
+      ? player.alternativePositionNames
+      : player?.preferredPositionName
+        ? [player.preferredPositionName]
+        : [];
+    for (const name of posNames) {
+      const normalized = name == null ? null : String(name);
+      if (!normalized) continue;
+      if (!requiredPositions.size || requiredPositions.has(normalized)) {
+        positions.add(normalized);
+      }
+    }
+  }
+  const clubs = buildCountsMap(groupPlayers, "teamId").size;
+  const rareCount = groupPlayers.filter((player) => isRareNonSpecialPlayer(player)).length;
+  const avgRating = computeAverage(groupPlayers.map((player) => player?.rating));
+  const requiredMatch =
+    axis === "league"
+      ? signature?.requiredLeagueIds?.includes?.(toNumber(groupId)) ?? false
+      : axis === "nation"
+        ? signature?.requiredNationIds?.includes?.(toNumber(groupId)) ?? false
+        : signature?.requiredClubIds?.includes?.(toNumber(groupId)) ?? false;
+  const score =
+    groupPlayers.length * 12 +
+    positions.size * 7 +
+    rareCount * 2 +
+    clubs * (axis === "club" ? 0 : 2) +
+    (requiredMatch ? 30 : 0) -
+    avgRating;
+  return { axis, groupId, score };
+};
+
+const generateBaselineSeeds = (signature, players, squadSize, context) => {
+  const baselineSeed = createSeedDescriptor({
+    type: "baseline",
+    label: "Baseline",
+  });
+  const hasUsefulSeedSignals = Boolean(
+    (signature?.requiredLeagueIds || []).length ||
+      (signature?.requiredNationIds || []).length ||
+      (signature?.requiredClubIds || []).length ||
+      signature?.hasSameLeagueMin ||
+      signature?.hasSameNationMin ||
+      signature?.hasSameClubMin ||
+      signature?.sameLeagueMax != null ||
+      signature?.sameNationMax != null ||
+      signature?.sameClubMax != null ||
+      (signature?.dominantAxes || []).length,
+  );
+  if (!hasUsefulSeedSignals) return [baselineSeed];
+  const requiredSeeds = [];
+  const exploratorySeeds = [];
+  for (const groupId of signature.requiredLeagueIds || []) {
+    requiredSeeds.push(
+      createSeedDescriptor({
+        type: "required_identity",
+        axis: "league",
+        groupId,
+        label: `Required league ${groupId}`,
+        strength: 5,
+      }),
+    );
+  }
+  for (const groupId of signature.requiredNationIds || []) {
+    requiredSeeds.push(
+      createSeedDescriptor({
+        type: "required_identity",
+        axis: "nation",
+        groupId,
+        label: `Required nation ${groupId}`,
+        strength: 5,
+      }),
+    );
+  }
+  for (const groupId of signature.requiredClubIds || []) {
+    requiredSeeds.push(
+      createSeedDescriptor({
+        type: "required_identity",
+        axis: "club",
+        groupId,
+        label: `Required club ${groupId}`,
+        strength: 5,
+      }),
+    );
+  }
+  if (
+    signature?.hasSameLeagueMin ||
+    (signature?.requiredLeagueIds || []).length ||
+    (signature?.dominantAxes || []).includes("league")
+  ) {
+    const leagues = Array.from(buildCountsMap(players, "leagueId").keys())
+      .map((groupId) =>
+        scoreGroupSeed(players, "league", groupId, signature, context, squadSize),
+      )
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 2);
+    for (const entry of leagues) {
+      exploratorySeeds.push(
+        createSeedDescriptor({
+          type: "dominant_league",
+          axis: "league",
+          groupId: entry.groupId,
+          label: `League ${entry.groupId}`,
+          strength: 4,
+        }),
+      );
+    }
+  }
+  if (
+    signature?.hasSameNationMin ||
+    (signature?.requiredNationIds || []).length ||
+    (signature?.dominantAxes || []).includes("nation")
+  ) {
+    const nations = Array.from(buildCountsMap(players, "nationId").keys())
+      .map((groupId) =>
+        scoreGroupSeed(players, "nation", groupId, signature, context, squadSize),
+      )
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 1);
+    for (const entry of nations) {
+      exploratorySeeds.push(
+        createSeedDescriptor({
+          type: "dominant_nation",
+          axis: "nation",
+          groupId: entry.groupId,
+          label: `Nation ${entry.groupId}`,
+          strength: 4,
+        }),
+      );
+    }
+  }
+  return dedupeSeeds([baselineSeed, ...requiredSeeds, ...exploratorySeeds]).slice(
+    0,
+    4,
+  );
+};
+
+const buildFiltersFingerprint = (filters = {}) =>
+  JSON.stringify({
+    excludeSpecial: toBooleanSetting(filters?.excludeSpecial, false),
+    useTotwPlayers: toBooleanSetting(filters?.useTotwPlayers, true),
+    useEvolutionPlayers: toBooleanSetting(filters?.useEvolutionPlayers, false),
+    onlyStorage: toBooleanSetting(filters?.onlyStorage, false),
+    onlyUntradeables: toBooleanSetting(filters?.onlyUntradeables, false),
+    onlyDuplicates: toBooleanSetting(filters?.onlyDuplicates, false),
+    ratingMin: toNumber(filters?.ratingMin) ?? null,
+    ratingMax: toNumber(filters?.ratingMax) ?? null,
+    excludedLeagueIds: (filters?.excludedLeagueIds || []).map(String).sort(),
+    excludedNationIds: (filters?.excludedNationIds || []).map(String).sort(),
+  });
+
+const buildWinningSeedCacheKey = (context, signature) =>
+  JSON.stringify({
+    signature: signature?.fingerprint ?? null,
+    revision:
+      toNumber(context?._cacheRevision) ??
+      toNumber(context?.snapshotRevision) ??
+      null,
+    filters: buildFiltersFingerprint(context?.filters || {}),
+  });
+
+const summarizeFailure = (result, seed, signature, phaseConfig) => {
+  const failingRequirements = Array.isArray(result?.failingRequirements)
+    ? result.failingRequirements
+    : [];
+  const chemistryShortfall =
+    result?.stats?.chemistryTargets?.total != null ||
+    result?.stats?.chemistryTargets?.minEach != null
+      ? getChemistryShortfall(
+          {
+            totalChem: toNumber(result?.stats?.chemistry?.totalChem) ?? 0,
+            minChem: toNumber(result?.stats?.chemistry?.minChem) ?? 0,
+          },
+          result?.stats?.chemistryTargets,
+        )
+      : { score: Infinity };
+  const snapshot = result?.compositionSnapshot ?? {
+    uniqueLeagues: Infinity,
+    uniqueNations: Infinity,
+    uniqueClubs: Infinity,
+    dominantLeague: null,
+    dominantLeagueCount: 0,
+    dominantNation: null,
+    dominantNationCount: 0,
+    dominantClub: null,
+    dominantClubCount: 0,
+    specialCount: 0,
+    rareCount: 0,
+  };
+  return {
+    seedType: seed?.type ?? "baseline",
+    axis: seed?.axis ?? null,
+    groupId: seed?.groupId ?? null,
+    rating: toNumber(result?.stats?.squadRating) ?? null,
+    totalChem: toNumber(result?.stats?.chemistry?.totalChem) ?? null,
+    chemShortfall: toNumber(chemistryShortfall?.score) ?? Infinity,
+    failingTypes: Array.from(
+      new Set(
+        failingRequirements
+          .map((entry) => normalizeRequirementType(entry))
+          .filter(Boolean),
+      ),
+    ),
+    uniqueLeagues: snapshot.uniqueLeagues,
+    uniqueNations: snapshot.uniqueNations,
+    uniqueClubs: snapshot.uniqueClubs,
+    dominantLeague: snapshot.dominantLeague,
+    dominantLeagueCount: snapshot.dominantLeagueCount,
+    dominantNation: snapshot.dominantNation,
+    dominantNationCount: snapshot.dominantNationCount,
+    dominantClub: snapshot.dominantClub,
+    dominantClubCount: snapshot.dominantClubCount,
+    specialCount: snapshot.specialCount,
+    rareCount: snapshot.rareCount,
+    phaseConfigId: phaseConfig?.id ?? null,
+  };
+};
+
+const compareFailureSummaries = (a, b) => {
+  const hardFailA = a?.failingTypes?.length ?? Infinity;
+  const hardFailB = b?.failingTypes?.length ?? Infinity;
+  if (hardFailA !== hardFailB) return hardFailA - hardFailB;
+  const chemA = toNumber(a?.chemShortfall) ?? Infinity;
+  const chemB = toNumber(b?.chemShortfall) ?? Infinity;
+  if (chemA !== chemB) return chemA - chemB;
+  const spreadA =
+    (toNumber(a?.uniqueLeagues) ?? 99) +
+    (toNumber(a?.uniqueNations) ?? 99) +
+    (toNumber(a?.uniqueClubs) ?? 99);
+  const spreadB =
+    (toNumber(b?.uniqueLeagues) ?? 99) +
+    (toNumber(b?.uniqueNations) ?? 99) +
+    (toNumber(b?.uniqueClubs) ?? 99);
+  if (spreadA !== spreadB) return spreadA - spreadB;
+  return 0;
+};
+
+const compareSolverResults = (a, b) => {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  const solvedA = Boolean(a?.stats?.solved);
+  const solvedB = Boolean(b?.stats?.solved);
+  if (solvedA !== solvedB) return solvedA ? -1 : 1;
+  if (solvedA && solvedB) {
+    const valueA =
+      a?.stats?.solvedValue ??
+      a?.stats?.refinement?.after ??
+      a?.stats?.refinement?.before ??
+      null;
+    const valueB =
+      b?.stats?.solvedValue ??
+      b?.stats?.refinement?.after ??
+      b?.stats?.refinement?.before ??
+      null;
+    if (valueA && valueB) {
+      if (isSolvedSquadValueBetter(valueA, valueB)) return -1;
+      if (isSolvedSquadValueBetter(valueB, valueA)) return 1;
+    }
+  }
+  return compareFailureSummaries(
+    summarizeFailure(a, a?.seed, a?.signature, a?.phaseConfig),
+    summarizeFailure(b, b?.seed, b?.signature, b?.phaseConfig),
+  );
+};
+
+const generateRescueSeeds = (
+  signature,
+  failureMemory,
+  players,
+  squadSize,
+  context,
+  triedSeedKeys = new Set(),
+) => {
+  const sortedFailures = (failureMemory || []).slice().sort(compareFailureSummaries);
+  const bestFailure = sortedFailures[0] ?? null;
+  if (!bestFailure) return { tier1: [], tier3: [] };
+  const tier1 = [];
+  const tier3 = [];
+  const pushSeed = (list, seed) => {
+    if (!seed) return;
+    const key = buildSeedKey(seed);
+    if (triedSeedKeys.has(key)) return;
+    triedSeedKeys.add(key);
+    list.push(seed);
+  };
+  if (
+    bestFailure.dominantLeague != null &&
+    toNumber(bestFailure.dominantLeagueCount) >=
+      Math.max(3, Math.floor((squadSize || 11) / 3))
+  ) {
+    pushSeed(
+      tier1,
+      createSeedDescriptor({
+        type: "rescue_full_dominant_league",
+        axis: "league",
+        groupId: bestFailure.dominantLeague,
+        label: `Rescue league ${bestFailure.dominantLeague}`,
+        strength: 6,
+        tier: 1,
+      }),
+    );
+    pushSeed(
+      tier3,
+      createSeedDescriptor({
+        type: "rescue_full_dominant_league",
+        axis: "league",
+        groupId: bestFailure.dominantLeague,
+        label: `Rescue hard league ${bestFailure.dominantLeague}`,
+        strength: 7,
+        tier: 3,
+        poolFilter: (player) =>
+          String(player?.leagueId ?? "") === String(bestFailure.dominantLeague),
+      }),
+    );
+  }
+  if (
+    bestFailure.dominantNation != null &&
+    toNumber(bestFailure.dominantNationCount) >=
+      Math.max(3, Math.floor((squadSize || 11) / 3))
+  ) {
+    pushSeed(
+      tier1,
+      createSeedDescriptor({
+        type: "rescue_full_dominant_nation",
+        axis: "nation",
+        groupId: bestFailure.dominantNation,
+        label: `Rescue nation ${bestFailure.dominantNation}`,
+        strength: 6,
+        tier: 1,
+      }),
+    );
+  }
+  for (const groupId of signature?.requiredLeagueIds || []) {
+    pushSeed(
+      tier1,
+      createSeedDescriptor({
+        type: "rescue_required_identity_not_tried",
+        axis: "league",
+        groupId,
+        label: `Rescue required league ${groupId}`,
+        strength: 6,
+        tier: 1,
+      }),
+    );
+  }
+  return { tier1: dedupeSeeds(tier1), tier3: dedupeSeeds(tier3) };
+};
+
+const compareSolverResult = (validSquad, solverResult) => ({
+  chemistryDelta:
+    (toNumber(computeChemistryEval(validSquad || [], [], validSquad?.length ?? 0)?.totalChem) ?? 0) -
+    (toNumber(solverResult?.stats?.chemistry?.totalChem) ?? 0),
+  ratingDelta:
+    (toNumber(getSquadRating(validSquad || [])) ?? 0) -
+    (toNumber(solverResult?.stats?.squadRating) ?? 0),
+  validSnapshot: buildCompositionSnapshot(validSquad || []),
+  solverSnapshot: solverResult?.compositionSnapshot ?? null,
+  failingRequirements: solverResult?.failingRequirements ?? [],
+});
+
+const attachOrchestrationSummary = (
+  result,
+  orchestration,
+  restartTimeBudgetMs,
+  timedOut = false,
+) => {
+  if (!result || typeof result !== "object") return result;
+  const stats = result?.stats ?? {};
+  const debugEnabled = Boolean(stats?.debugEnabled);
+  const existingDebugLog = Array.isArray(stats?.debugLog) ? stats.debugLog : [];
+  const debugLog = debugEnabled
+    ? existingDebugLog.concat([
+        {
+          stage: "orchestration",
+          action: "summary",
+          restartTimeBudgetMs,
+          timedOut,
+          baselineSeedCount: orchestration?.baselineSeeds?.length ?? 0,
+          rescueSeedCount: orchestration?.rescueSeeds?.length ?? 0,
+          winningSeed: orchestration?.winningSeed ?? null,
+          perSeed: orchestration?.perSeed ?? [],
+        },
+      ])
+    : existingDebugLog;
+  return {
+    ...result,
+    stats: {
+      ...stats,
+      debugLog,
+      orchestration,
+    },
+  };
+};
+
+const tryChemistryAnchorRewrite = (
+  squad,
+  pool,
+  rules,
+  squadSize,
+  slots,
+  targets,
+  hardLockedIds,
+  signature,
+  debugPush,
+  options = {},
+) => {
+  const slotList = Array.isArray(slots) ? slots : [];
+  const n = Math.min(toNumber(squadSize) ?? 0, slotList.length, squad.length);
+  if (n <= 0) return { changed: false };
+  const baseChem = computeChemistryEval(squad, slotList, n);
+  if (!baseChem || isChemistrySatisfied(baseChem, targets)) {
+    return { changed: false };
+  }
+  const hardLocked = hardLockedIds instanceof Set ? hardLockedIds : new Set();
+  const playerChem = new Array(n).fill(0);
+  if (Array.isArray(baseChem.slotToPlayerIndex)) {
+    for (let slotIndex = 0; slotIndex < Math.min(n, baseChem.slotToPlayerIndex.length); slotIndex += 1) {
+      const playerIndex = baseChem.slotToPlayerIndex[slotIndex];
+      if (playerIndex == null || playerIndex < 0 || playerIndex >= n) continue;
+      playerChem[playerIndex] = baseChem.perSlotChem?.[slotIndex] ?? 0;
+    }
+  }
+  const worstIndices = Array.from({ length: n }, (_, index) => index)
+    .filter((index) => !hardLocked.has(squad[index]?.id))
+    .sort((a, b) => playerChem[a] - playerChem[b]);
+  if (!worstIndices.length) return { changed: false };
+  const dominantLeague = getDominantCountEntry(squad.slice(0, n), "leagueId");
+  const dominantNation = getDominantCountEntry(squad.slice(0, n), "nationId");
+  const anchors = [];
+  for (const groupId of signature?.requiredLeagueIds || []) {
+    anchors.push({ axis: "league", groupId });
+  }
+  for (const groupId of signature?.requiredNationIds || []) {
+    anchors.push({ axis: "nation", groupId });
+  }
+  if (dominantLeague.value != null) {
+    anchors.push({ axis: "league", groupId: dominantLeague.value });
+  }
+  if (dominantNation.value != null) {
+    anchors.push({ axis: "nation", groupId: dominantNation.value });
+  }
+  const seenAnchors = new Set();
+  const uniqueAnchors = anchors.filter((entry) => {
+    const key = `${entry.axis}:${entry.groupId}`;
+    if (seenAnchors.has(key)) return false;
+    seenAnchors.add(key);
+    return true;
+  });
+  const rewriteSizes = Array.isArray(options?.rewriteSizes)
+    ? options.rewriteSizes
+    : [3, 4, 5];
+  const currentShortfall = getChemistryShortfall(baseChem, targets);
+  let best = null;
+  for (const anchor of uniqueAnchors) {
+    const attr = AXIS_TO_ATTR[anchor.axis] ?? null;
+    if (!attr) continue;
+    const candidates = (pool || [])
+      .filter((player) => player && player.id != null)
+      .filter((player) => String(player?.[attr] ?? "") === String(anchor.groupId))
+      .sort((a, b) => a.rating - b.rating);
+    if (!candidates.length) continue;
+    for (const size of rewriteSizes) {
+      const replaceIndices = worstIndices.slice(0, Math.min(worstIndices.length, size));
+      if (!replaceIndices.length) continue;
+      const nextSquad = squad.slice();
+      const usedIds = new Set(
+        nextSquad.map((player) => player?.id).filter((id) => id != null),
+      );
+      const usedDefs = new Set(
+        nextSquad
+          .map((player) => getDefinitionKey(player))
+          .filter((value) => value != null)
+          .map((value) => String(value)),
+      );
+      for (const index of replaceIndices) {
+        usedIds.delete(nextSquad[index]?.id);
+        const previousDef = getDefinitionKey(nextSquad[index]);
+        if (previousDef != null) usedDefs.delete(String(previousDef));
+      }
+      let replaced = 0;
+      for (const index of replaceIndices) {
+        const replacement = candidates.find((candidate) => {
+          if (!candidate || candidate.id == null) return false;
+          if (usedIds.has(candidate.id)) return false;
+          const defKey = getDefinitionKey(candidate);
+          if (defKey != null && usedDefs.has(String(defKey))) return false;
+          const trial = nextSquad.slice();
+          trial[index] = candidate;
+          return isSquadValid(rules, trial, n);
+        });
+        if (!replacement) break;
+        nextSquad[index] = replacement;
+        usedIds.add(replacement.id);
+        const defKey = getDefinitionKey(replacement);
+        if (defKey != null) usedDefs.add(String(defKey));
+        replaced += 1;
+      }
+      if (replaced !== replaceIndices.length) continue;
+      if (!isSquadValid(rules, nextSquad, n)) continue;
+      const nextChem = computeChemistryEval(nextSquad, slotList, n);
+      const nextShortfall = getChemistryShortfall(nextChem, targets);
+      if (nextShortfall.score >= currentShortfall.score) continue;
+      if (
+        !best ||
+        nextShortfall.score < best.shortfall.score ||
+        (nextShortfall.score === best.shortfall.score &&
+          (nextChem?.totalChem ?? 0) > (best.chem?.totalChem ?? 0))
+      ) {
+        best = {
+          squad: nextSquad,
+          chem: nextChem,
+          shortfall: nextShortfall,
+          axis: anchor.axis,
+          groupId: anchor.groupId,
+          replaced,
+        };
+      }
+    }
+  }
+  if (!best) return { changed: false };
+  squad.splice(0, squad.length, ...best.squad);
+  debugPush?.({
+    stage: "chemistry",
+    action: "anchor_rewrite",
+    axis: best.axis,
+    groupId: best.groupId,
+    replaced: best.replaced,
+    totalChem: best.chem?.totalChem ?? null,
+    minChem: best.chem?.minChem ?? null,
+    shortfall: best.shortfall?.score ?? null,
+  });
+  return {
+    changed: true,
+    chemistry: best.chem,
+  };
+};
+
+const runPipeline = (inputContext, seed = null, phaseConfig = null) => {
+  const context = {
+    ...(inputContext || {}),
+    optimize: {
+      ...((inputContext && inputContext.optimize) || {}),
+      ...((phaseConfig && phaseConfig.optimize) || {}),
+    },
+    seed,
+    phaseConfig,
+  };
+  const contextSeed = seed && typeof seed === "object" ? seed : null;
   const players = context?.players || [];
   const requirementFlags =
     context?.requirementFlags ||
@@ -3784,7 +5956,11 @@ export const solveSquad = (context) => {
       }
     : null;
   const normalizePlayersStart = Date.now();
-  const normalizedPlayers = normalizePlayers(players);
+  const normalizedPool = normalizePlayers(players);
+  const normalizedPlayers =
+    contextSeed && typeof contextSeed.poolFilter === "function"
+      ? normalizedPool.filter((player) => contextSeed.poolFilter(player))
+      : normalizedPool;
   timingsMs.normalizePlayers = Date.now() - normalizePlayersStart;
 
   const compileConstraintsStart = Date.now();
@@ -3806,6 +5982,8 @@ export const solveSquad = (context) => {
     getSquadSize(rules, fallbackSquadSize),
     normalizedPlayers.length,
   );
+  const signature =
+    context?.signature || buildChallengeSignature(rules, squadSize);
   const ratingRequirement = getTeamRatingTarget(rules);
   const chemistryTargets = getChemistryRequirementTargets(rules, squadSize);
   const chemistryRequired =
@@ -4048,7 +6226,9 @@ export const solveSquad = (context) => {
           : rule.type === "same_league_count"
             ? "leagueId"
             : "teamId";
-      const group = selectGroupForSameCount(pool, attr, required);
+      const group = selectGroupForSameCount(pool, attr, required, {
+        prefillBias: contextSeed?.prefillBias ?? null,
+      });
       if (group == null) {
         ignoredRequirements.push(rule.raw);
         debugPush?.({
@@ -4131,7 +6311,9 @@ export const solveSquad = (context) => {
             : type === "same_league_count"
               ? "leagueId"
               : "teamId";
-        const group = selectGroupForSameCount(pool, attr, required);
+        const group = selectGroupForSameCount(pool, attr, required, {
+          prefillBias: contextSeed?.prefillBias ?? null,
+        });
         if (group == null) {
           ignoredRequirements.push(rule.raw);
           debugPush?.({
@@ -4159,6 +6341,7 @@ export const solveSquad = (context) => {
             squadSizeCap: squadSize,
             ratingHint: ratingFillHint,
             preferencePredicates: prefillPreferencePredicates,
+            seed: contextSeed,
           },
         );
         appliedFilters.push({
@@ -4220,6 +6403,7 @@ export const solveSquad = (context) => {
           squadSizeCap: squadSize,
           ratingHint: ratingFillHint,
           preferencePredicates: prefillPreferencePredicates,
+          seed: contextSeed,
         },
       );
       appliedFilters.push({
@@ -4297,6 +6481,10 @@ export const solveSquad = (context) => {
   // Soft-discourage specials: at equal rating, non-specials come first in pool ordering.
   // This passively makes fill/swap prefer non-specials without blocking specials.
   pool.sort((a, b) => {
+    const seedBiasDiff =
+      getSeedPoolBiasScore(a, contextSeed) -
+      getSeedPoolBiasScore(b, contextSeed);
+    if (seedBiasDiff !== 0) return seedBiasDiff;
     const ra = toNumber(a?.rating) ?? 0;
     const rb = toNumber(b?.rating) ?? 0;
     if (ra !== rb) return ra - rb;
@@ -4577,6 +6765,44 @@ export const solveSquad = (context) => {
         chemistry = computeChemistryEval(squad, slotsForChemistry, squadSize);
 
         if (!isChemistrySatisfied(chemistry, chemistryTargets)) {
+          const nonChemistryFailures = [];
+          for (const rule of rules) {
+            if (!rule) continue;
+            if (
+              rule.type === "chemistry_points" ||
+              rule.type === "all_players_chemistry_points"
+            ) {
+              continue;
+            }
+            const failing = evaluateRule(rule, squad, squadSize, {
+              checkChemistry: chemistryRequired,
+              chemistry,
+            });
+            if (failing) nonChemistryFailures.push(failing);
+          }
+          if (
+            signature?.isCompositionPuzzle &&
+            nonChemistryFailures.length === 0
+          ) {
+            const rewrite = tryChemistryAnchorRewrite(
+              squad,
+              pool,
+              rules,
+              squadSize,
+              slotsForChemistry,
+              chemistryTargets,
+              hardLockedIds,
+              signature,
+              debugPush,
+            );
+            if (rewrite?.changed) {
+              chemistry =
+                rewrite?.chemistry ??
+                computeChemistryEval(squad, slotsForChemistry, squadSize);
+            }
+          }
+
+          if (!isChemistrySatisfied(chemistry, chemistryTargets)) {
           const shortfall = getChemistryShortfall(chemistry, chemistryTargets);
           const extendedShortfallThreshold = Math.max(
             1,
@@ -4657,23 +6883,106 @@ export const solveSquad = (context) => {
             chemistry = computeChemistryEval(squad, slotsForChemistry, squadSize);
           }
         }
+        }
       }
     }
     timingsMs.chemistry = Date.now() - chemistryStart;
   }
 
-  const evalCtx = {
-    checkChemistry: chemistryRequired,
-    chemistry,
+  const buildFailingRequirements = (workingSquad, currentChemistry) => {
+    const evalCtx = {
+      checkChemistry: chemistryRequired,
+      chemistry: currentChemistry,
+    };
+    const failing = [];
+    for (const rule of rules) {
+      const failedRule = evaluateRule(rule, workingSquad, squadSize, evalCtx);
+      if (failedRule) failing.push(failedRule);
+    }
+    return failing;
   };
 
-  const failingRequirements = [];
-  for (const rule of rules) {
-    const failing = evaluateRule(rule, squad, squadSize, evalCtx);
-    if (failing) failingRequirements.push(failing);
-  }
+  let failingRequirements = buildFailingRequirements(squad, chemistry);
+  let solved = failingRequirements.length === 0;
+  let refinement = {
+    ran: false,
+    changed: false,
+    before: null,
+    after: null,
+    singleSwaps: 0,
+    pairEscapes: 0,
+    reshapeTriggered: false,
+    reshapeReason: null,
+    reshapeChanged: false,
+    reshapeCandidatesEvaluated: 0,
+    elapsedMs: 0,
+  };
 
-  const solved = failingRequirements.length === 0;
+  if (solved && context?.optimize?.refineSolvedSquad !== false) {
+    const refineStart = Date.now();
+    const refineTimeBudgetMs =
+      toNumber(context?.optimize?.refineTimeBudgetMs) ??
+      (signature?.isCompositionPuzzle || chemistryRequired ? 250 : 120);
+    const refineResult = refineSolvedSquad(
+      squad,
+      normalizedPlayers,
+      rules,
+      squadSize,
+      lockedIds,
+      debugPush,
+      {
+        ratingTarget: ratingRequirement?.target ?? null,
+        pivot: context?.optimize?.preservePivot ?? null,
+        requiredInforms: informBounds?.min ?? 0,
+        requiredSpecials: 0,
+        chemistryRequired,
+        slotsForChemistry,
+        chemistryTargets,
+        initialChemistry: chemistry,
+        signature,
+        timeBudgetMs: refineTimeBudgetMs,
+        maxSingleIterations:
+          context?.optimize?.refineMaxSingleIterations ?? 6,
+        pairSearchEnabled:
+          context?.optimize?.refinePairSearchEnabled !== false,
+        pairCandidateLimit:
+          context?.optimize?.refinePairCandidateLimit ?? 16,
+        window: context?.optimize?.refineWindow ?? 6,
+        balancedReshapeEnabled:
+          context?.optimize?.refineBalancedReshape === true,
+        maxCandidates:
+          context?.optimize?.refineMaxCandidates ??
+          (signature?.isCompositionPuzzle ? 60 : 60),
+        maxEvaluations:
+          context?.optimize?.refineMaxEvaluations ??
+          (signature?.isCompositionPuzzle ? 220 : 220),
+      },
+    );
+    timingsMs.refine = Date.now() - refineStart;
+    refinement = {
+      ran: Boolean(refineResult?.ran),
+      changed: Boolean(refineResult?.changed),
+      before: refineResult?.before ?? null,
+      after: refineResult?.after ?? null,
+      singleSwaps: refineResult?.singleSwaps ?? 0,
+      pairEscapes: refineResult?.pairEscapes ?? 0,
+      reshapeTriggered: Boolean(refineResult?.reshapeTriggered),
+      reshapeReason: refineResult?.reshapeReason ?? null,
+      reshapeChanged: Boolean(refineResult?.reshapeChanged),
+      reshapeCandidatesEvaluated:
+        refineResult?.reshapeCandidatesEvaluated ?? 0,
+      elapsedMs: refineResult?.elapsedMs ?? timingsMs.refine,
+    };
+    if (refineResult?.changed) {
+      squad = refineResult.squad;
+      chemistry = chemistryRequired
+        ? refineResult?.chemistry ??
+          computeChemistryEval(squad, slotsForChemistry, squadSize)
+        : null;
+      failingRequirements = buildFailingRequirements(squad, chemistry);
+      solved = failingRequirements.length === 0;
+    }
+  }
 
   // Chemistry can be extremely sensitive to which clubs are in the squad.
   // If our local chemistry swap pass gets stuck, do a small "club set" search by swapping one club
@@ -4783,15 +7092,19 @@ export const solveSquad = (context) => {
           );
           if (restrictedPlayers.length < squadSize) return null;
 
-          return solveSquad({
-            ...context,
-            players: restrictedPlayers,
-            debug: Boolean(debug),
-            optimize: {
-              ...(context?.optimize || {}),
-              chemClubSearch: false,
+          return runPipeline(
+            {
+              ...context,
+              players: restrictedPlayers,
+              debug: Boolean(debug),
+              optimize: {
+                ...(context?.optimize || {}),
+                chemClubSearch: false,
+              },
             },
-          });
+            contextSeed,
+            context?.phaseConfig ?? null,
+          );
         };
 
         const debugWanted = Boolean(context?.debug);
@@ -4898,6 +7211,19 @@ export const solveSquad = (context) => {
       : null;
 
   timingsMs.total = Date.now() - startedAt;
+  const solvedValue = solved
+    ? getSolvedSquadValueMetrics(
+        squad,
+        pool,
+        ratingRequirement?.target ?? null,
+        {
+          pivot: context?.optimize?.preservePivot ?? null,
+          requiredInforms: informBounds?.min ?? 0,
+          requiredSpecials: 0,
+          signature,
+        },
+      )
+    : null;
 
   return {
     solutions: solved
@@ -4932,6 +7258,8 @@ export const solveSquad = (context) => {
       appliedFilters,
       debugEnabled,
       debugLog,
+      refinement,
+      solvedValue,
       debugSquad: debugEnabled
         ? squad.map((player) => ({
             id: player?.id ?? null,
@@ -4948,5 +7276,274 @@ export const solveSquad = (context) => {
       requirementFlags,
       constraintSummary: compiledConstraints.summary,
     },
+    seed: contextSeed,
+    signature,
+    phaseConfig: context?.phaseConfig ?? null,
+    compositionSnapshot: buildCompositionSnapshot(squad, squadSize),
   };
+};
+
+export const solveSquad = (context) => {
+  const baseContext = context && typeof context === "object" ? context : {};
+  const players = Array.isArray(baseContext?.players) ? baseContext.players : [];
+  if (!players.length) {
+    return runPipeline(baseContext, null, null);
+  }
+
+  const requirementFlags =
+    baseContext?.requirementFlags ||
+    getRequirementFlags(baseContext?.requirementsNormalized || []);
+  const fallbackSquadSize = (() => {
+    const fromContext = toNumber(baseContext?.requiredPlayers);
+    if (fromContext != null && fromContext > 0) return fromContext;
+    return DEFAULT_SQUAD_SIZE;
+  })();
+  const compiledConstraints = compileConstraintSet(
+    baseContext?.requirementsNormalized || [],
+    { fallbackSquadSize },
+  );
+  const rules = normalizeRules(
+    baseContext?.requirementsNormalized || [],
+    requirementFlags,
+    null,
+    compiledConstraints,
+  );
+  const normalizedPlayers = normalizePlayers(players);
+  const squadSize = Math.min(
+    getSquadSize(rules, fallbackSquadSize),
+    normalizedPlayers.length,
+  );
+  const signature = buildChallengeSignature(rules, squadSize);
+  const baselinePhaseConfig = getBaselinePhaseConfig(
+    baseContext?.optimize || {},
+  );
+  const fallbackPhaseConfig = getPhaseConfig(
+    signature,
+    baseContext?.optimize || {},
+  );
+  const restartTimeBudgetMs = Math.max(
+    1000,
+    toNumber(baseContext?.optimize?.restartTimeBudgetMs) ??
+      DEFAULT_RESTART_TIME_BUDGET_MS,
+  );
+  const fallbackTimeBudgetMs = Math.max(
+    0,
+    toNumber(baseContext?.optimize?.fallbackTimeBudgetMs) ??
+      (signature?.isCompositionPuzzle ? 3000 : 1500),
+  );
+
+  const cacheKey = buildWinningSeedCacheKey(baseContext, signature);
+  const cachedSeedKey = cacheKey ? WINNING_SEED_CACHE.get(cacheKey) ?? null : null;
+
+  const failureMemory = [];
+  const triedSeedKeys = new Set();
+  const orchestration = {
+    signature,
+    phaseConfig: baselinePhaseConfig,
+    fallbackPhaseConfig,
+    baselineSeeds: [],
+    rescueSeeds: [],
+    winningSeed: null,
+    perSeed: [],
+  };
+  const deadlineAt = Date.now() + restartTimeBudgetMs;
+  let activeDeadlineAt = deadlineAt;
+  let bestResult = null;
+  let bestSolvedSeedKey = null;
+
+  const runSeed = (seed, activePhaseConfig) => {
+    const key = buildSeedKey(seed);
+    if (triedSeedKeys.has(key)) return null;
+    triedSeedKeys.add(key);
+    const result = runPipeline(
+      {
+        ...baseContext,
+        requirementFlags,
+        signature,
+      },
+      seed,
+      activePhaseConfig,
+    );
+    const failureSummary = summarizeFailure(
+      result,
+      seed,
+      signature,
+      activePhaseConfig,
+    );
+    if (!result?.stats?.solved) {
+      failureMemory.push(failureSummary);
+    }
+    orchestration.perSeed.push({
+      seed: {
+        type: seed?.type ?? "baseline",
+        axis: seed?.axis ?? null,
+        groupId: seed?.groupId ?? null,
+        tier: seed?.tier ?? 0,
+      },
+      solved: Boolean(result?.stats?.solved),
+      failureSummary,
+    });
+    const seedSummary = {
+      type: seed?.type ?? "baseline",
+      axis: seed?.axis ?? null,
+      groupId: seed?.groupId ?? null,
+      tier: seed?.tier ?? 0,
+    };
+    if (!bestResult || compareSolverResults(result, bestResult) < 0) {
+      bestResult = result;
+      if (result?.stats?.solved) {
+        bestSolvedSeedKey = key;
+        orchestration.winningSeed = seedSummary;
+      }
+    }
+    return result;
+  };
+
+  const baselineResult = runSeed(null, baselinePhaseConfig);
+  if (baselineResult?.stats?.solved) {
+    return attachOrchestrationSummary(
+      bestResult,
+      orchestration,
+      restartTimeBudgetMs,
+    );
+  }
+  if (fallbackTimeBudgetMs > 0) {
+    activeDeadlineAt = Math.max(deadlineAt, Date.now() + fallbackTimeBudgetMs);
+  }
+  if (Date.now() >= activeDeadlineAt) {
+    return attachOrchestrationSummary(
+      bestResult,
+      orchestration,
+      restartTimeBudgetMs,
+      Date.now() >= activeDeadlineAt,
+    );
+  }
+
+  orchestration.phaseConfig = fallbackPhaseConfig;
+  let seeds = generateBaselineSeeds(
+    signature,
+    normalizedPlayers,
+    squadSize,
+    baseContext,
+  ).filter(
+    (seed) =>
+      !(
+        seed?.type === "baseline" &&
+        seed?.axis == null &&
+        seed?.groupId == null &&
+        (seed?.tier ?? 0) === 0
+      ),
+  );
+  if (cachedSeedKey) {
+    seeds = seeds.sort((a, b) => {
+      const aCached = buildSeedKey(a) === cachedSeedKey;
+      const bCached = buildSeedKey(b) === cachedSeedKey;
+      if (aCached === bCached) return 0;
+      return aCached ? -1 : 1;
+    });
+  }
+  orchestration.baselineSeeds = seeds.map((seed) => ({
+    type: seed?.type ?? "baseline",
+    axis: seed?.axis ?? null,
+    groupId: seed?.groupId ?? null,
+    tier: seed?.tier ?? 0,
+    label: seed?.label ?? null,
+  }));
+
+  for (const seed of seeds) {
+    if (Date.now() >= activeDeadlineAt) {
+      return attachOrchestrationSummary(
+        bestResult,
+        orchestration,
+        restartTimeBudgetMs,
+        true,
+      );
+    }
+    const result = runSeed(seed, fallbackPhaseConfig);
+    if (result?.stats?.solved) {
+      if (
+        cacheKey &&
+        bestSolvedSeedKey &&
+        orchestration?.winningSeed?.type !== "baseline"
+      ) {
+        WINNING_SEED_CACHE.set(cacheKey, bestSolvedSeedKey);
+      }
+      return attachOrchestrationSummary(
+        bestResult,
+        orchestration,
+        restartTimeBudgetMs,
+      );
+    }
+  }
+
+  const rescueSeeds = generateRescueSeeds(
+    signature,
+    failureMemory,
+    normalizedPlayers,
+    squadSize,
+    baseContext,
+    triedSeedKeys,
+  );
+  orchestration.rescueSeeds = [
+    ...(rescueSeeds?.tier1 || []),
+    ...(rescueSeeds?.tier3 || []),
+  ].map((seed) => ({
+    type: seed?.type ?? "baseline",
+    axis: seed?.axis ?? null,
+    groupId: seed?.groupId ?? null,
+    tier: seed?.tier ?? 0,
+    label: seed?.label ?? null,
+  }));
+
+  for (const tierSeed of rescueSeeds?.tier1 || []) {
+    if (Date.now() >= activeDeadlineAt) break;
+    const result = runSeed(tierSeed, fallbackPhaseConfig);
+    if (result?.stats?.solved) {
+      if (
+        cacheKey &&
+        bestSolvedSeedKey &&
+        orchestration?.winningSeed?.type !== "baseline"
+      ) {
+        WINNING_SEED_CACHE.set(cacheKey, bestSolvedSeedKey);
+      }
+      return attachOrchestrationSummary(
+        bestResult,
+        orchestration,
+        restartTimeBudgetMs,
+      );
+    }
+  }
+
+  for (const tierSeed of rescueSeeds?.tier3 || []) {
+    if (Date.now() >= activeDeadlineAt) break;
+    const result = runSeed(tierSeed, fallbackPhaseConfig);
+    if (result?.stats?.solved) {
+      if (
+        cacheKey &&
+        bestSolvedSeedKey &&
+        orchestration?.winningSeed?.type !== "baseline"
+      ) {
+        WINNING_SEED_CACHE.set(cacheKey, bestSolvedSeedKey);
+      }
+      return attachOrchestrationSummary(
+        bestResult,
+        orchestration,
+        restartTimeBudgetMs,
+      );
+    }
+  }
+
+  if (
+    cacheKey &&
+    bestSolvedSeedKey &&
+    orchestration?.winningSeed?.type !== "baseline"
+  ) {
+    WINNING_SEED_CACHE.set(cacheKey, bestSolvedSeedKey);
+  }
+  return attachOrchestrationSummary(
+    bestResult,
+    orchestration,
+    restartTimeBudgetMs,
+    Date.now() >= activeDeadlineAt,
+  );
 };
