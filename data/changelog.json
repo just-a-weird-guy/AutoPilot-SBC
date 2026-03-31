@@ -7,8 +7,8 @@
       "headline": "More reliable solving and smarter fetching",
       "summary": "Made the solver more reliable, improved player fetching, and cleaned up small UI details.",
       "details": [
-        "Added a better fallback flow so the solver recovers more reliably when the first pass misses.",
-        "Improved player fetching so warm data gets reused more intelligently.",
+        "Added a better fallback flow so the solver recovers more reliably solve difficult challenges.",
+        "Improved player fetching to allow for more intelligent triggers.",
         "Made small UI improvements and cleanup tweaks."
       ]
     },
