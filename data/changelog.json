@@ -2,6 +2,17 @@
   "version": 1,
   "releases": [
     {
+      "version": "1.8",
+      "date": "2026-04-01",
+      "headline": "More reliable solving and smarter fetching",
+      "summary": "Made the solver more reliable, improved player fetching, and cleaned up small UI details.",
+      "details": [
+        "Added a better fallback flow so the solver recovers more reliably when the first pass misses.",
+        "Improved player fetching so warm data gets reused more intelligently.",
+        "Made small UI improvements and cleanup tweaks."
+      ]
+    },
+    {
       "version": "1.7.1",
       "date": "2026-03-27",
       "headline": "Fixes and patching",
