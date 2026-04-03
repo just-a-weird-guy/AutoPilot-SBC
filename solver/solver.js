@@ -3607,6 +3607,26 @@ const optimizeSquadForPreservation = (
 const getDefinitionKey = (player) =>
   player?.definitionId ?? player?.defId ?? player?.id ?? null;
 
+const getDuplicateDefinitionKeys = (squad, squadSize = null) => {
+  const n = Math.min(
+    toNumber(squadSize) ?? squad?.length ?? 0,
+    squad?.length ?? 0,
+  );
+  const counts = new Map();
+  for (let index = 0; index < n; index += 1) {
+    const defKey = getDefinitionKey(squad?.[index]);
+    if (defKey == null) continue;
+    const normalized = String(defKey);
+    counts.set(normalized, (counts.get(normalized) || 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .filter(([, count]) => count > 1)
+    .map(([key]) => key);
+};
+
+const hasDuplicateDefinitions = (squad, squadSize = null) =>
+  getDuplicateDefinitionKeys(squad, squadSize).length > 0;
+
 const isSquadValid = (rules, squad, squadSize) => {
   for (const rule of rules || []) {
     if (!rule) continue;
@@ -3616,12 +3636,33 @@ const isSquadValid = (rules, squad, squadSize) => {
   return true;
 };
 
-const enforceUniqueDefinitions = (squad, pool, rules, squadSize, debugPush) => {
+const enforceUniqueDefinitions = (
+  squad,
+  pool,
+  rules,
+  squadSize,
+  debugPush,
+  options = {},
+) => {
   const usedIds = new Set(
     (squad || []).map((player) => player?.id).filter((id) => id != null),
   );
   const seenDefs = new Set();
   let replaced = 0;
+  const chemistryRequired = Boolean(options?.chemistryRequired);
+  const slotsForChemistry = Array.isArray(options?.slotsForChemistry)
+    ? options.slotsForChemistry
+    : null;
+  const chemistryTargets = options?.chemistryTargets ?? null;
+  const currentChemistry = options?.currentChemistry ?? null;
+  const chemistryIsRelevant =
+    chemistryRequired &&
+    Array.isArray(slotsForChemistry) &&
+    slotsForChemistry.length >= squadSize &&
+    chemistryTargets;
+  const requireChemistrySatisfied =
+    chemistryIsRelevant &&
+    isChemistrySatisfied(currentChemistry, chemistryTargets);
 
   for (let index = 0; index < (squad || []).length; index += 1) {
     const player = squad[index];
@@ -3644,27 +3685,77 @@ const enforceUniqueDefinitions = (squad, pool, rules, squadSize, debugPush) => {
       .sort((a, b) => a.rating - b.rating);
 
     let replacedThis = false;
+    let bestReplacement = null;
     for (const candidate of candidates) {
       const previous = squad[index];
       squad[index] = candidate;
       if (isSquadValid(rules, squad, squadSize)) {
-        const candidateDef = getDefinitionKey(candidate);
-        usedIds.delete(previous?.id ?? null);
-        usedIds.add(candidate.id);
-        if (candidateDef != null) seenDefs.add(candidateDef);
-        replaced += 1;
-        replacedThis = true;
-        debugPush?.({
-          stage: "dedupe",
-          action: "replace",
-          outId: previous?.id ?? null,
-          outDefinitionId: getDefinitionKey(previous),
-          inId: candidate.id,
-          inDefinitionId: candidateDef ?? null,
-        });
-        break;
+        const nextChem = chemistryIsRelevant
+          ? computeChemistryEval(squad, slotsForChemistry, squadSize)
+          : null;
+        const nextChemSatisfied = chemistryIsRelevant
+          ? isChemistrySatisfied(nextChem, chemistryTargets)
+          : true;
+        const nextShortfall = chemistryIsRelevant
+          ? getChemistryShortfall(nextChem, chemistryTargets).score
+          : 0;
+        const replacementScore = {
+          keepsChemistry:
+            requireChemistrySatisfied ? Number(nextChemSatisfied) : 0,
+          chemistryShortfall: nextShortfall,
+          rating: toNumber(candidate?.rating) ?? 0,
+        };
+        if (
+          !bestReplacement ||
+          replacementScore.keepsChemistry > bestReplacement.score.keepsChemistry ||
+          (replacementScore.keepsChemistry ===
+            bestReplacement.score.keepsChemistry &&
+            replacementScore.chemistryShortfall <
+              bestReplacement.score.chemistryShortfall) ||
+          (replacementScore.keepsChemistry ===
+            bestReplacement.score.keepsChemistry &&
+            replacementScore.chemistryShortfall ===
+              bestReplacement.score.chemistryShortfall &&
+            replacementScore.rating < bestReplacement.score.rating)
+        ) {
+          bestReplacement = {
+            candidate,
+            previous,
+            chemistry: nextChem,
+            score: replacementScore,
+          };
+        }
       }
       squad[index] = previous;
+    }
+
+    if (
+      bestReplacement &&
+      (!requireChemistrySatisfied || bestReplacement.score.keepsChemistry > 0)
+    ) {
+      const { candidate, previous, chemistry: replacementChemistry } =
+        bestReplacement;
+      squad[index] = candidate;
+      const candidateDef = getDefinitionKey(candidate);
+      usedIds.delete(previous?.id ?? null);
+      usedIds.add(candidate.id);
+      if (candidateDef != null) seenDefs.add(candidateDef);
+      replaced += 1;
+      replacedThis = true;
+      debugPush?.({
+        stage: "dedupe",
+        action: "replace",
+        outId: previous?.id ?? null,
+        outDefinitionId: getDefinitionKey(previous),
+        inId: candidate.id,
+        inDefinitionId: candidateDef ?? null,
+        chemistryShortfall: chemistryIsRelevant
+          ? bestReplacement.score.chemistryShortfall
+          : null,
+        chemistrySatisfied: chemistryIsRelevant
+          ? isChemistrySatisfied(replacementChemistry, chemistryTargets)
+          : null,
+      });
     }
 
     if (!replacedThis) {
@@ -5229,8 +5320,11 @@ const buildChallengeSignature = (rules, squadSize) => {
         signature.requiredNationIds.length ||
         signature.requiredClubIds.length ||
         signature.sameClubMax != null ||
+        signature.sameLeagueMax != null ||
+        signature.sameNationMax != null ||
         (signature.totalChemistryTarget != null &&
-          signature.totalChemistryTarget >= 28)
+          signature.totalChemistryTarget >=
+            Math.max(22, Math.floor((toNumber(squadSize) ?? 11) * 2)))
       ),
   );
   signature.fingerprint = JSON.stringify({
@@ -5358,7 +5452,15 @@ const dedupeSeeds = (seeds) => {
   return list;
 };
 
-const scoreGroupSeed = (players, axis, groupId, signature, context, squadSize) => {
+const scoreGroupSeed = (
+  players,
+  axis,
+  groupId,
+  signature,
+  context,
+  squadSize,
+  mode = "default",
+) => {
   const attr = AXIS_TO_ATTR[axis] ?? null;
   if (!attr || groupId == null) return null;
   const groupPlayers = (players || []).filter(
@@ -5390,13 +5492,40 @@ const scoreGroupSeed = (players, axis, groupId, signature, context, squadSize) =
       : axis === "nation"
         ? signature?.requiredNationIds?.includes?.(toNumber(groupId)) ?? false
         : signature?.requiredClubIds?.includes?.(toNumber(groupId)) ?? false;
-  const score =
+  const defaultScore =
     groupPlayers.length * 12 +
     positions.size * 7 +
     rareCount * 2 +
     clubs * (axis === "club" ? 0 : 2) +
     (requiredMatch ? 30 : 0) -
     avgRating;
+  const chemistryTarget = toNumber(signature?.totalChemistryTarget) ?? 0;
+  const ratingTarget = toNumber(signature?.ratingTarget) ?? 0;
+  const chemistryRatingScore =
+    groupPlayers.length * 6 +
+    positions.size * 9 +
+    rareCount * 2 +
+    clubs * (axis === "club" ? 0 : 2) +
+    avgRating * 4 +
+    chemistryTarget * 2 +
+    ratingTarget * 3 +
+    (requiredMatch ? 30 : 0);
+  const cappedCount = Math.min(groupPlayers.length, Math.max(6, toNumber(squadSize) ?? 11));
+  const ratingHeavyScore =
+    cappedCount * 8 +
+    positions.size * 15 +
+    rareCount * 2 +
+    clubs * (axis === "club" ? 0 : 2) +
+    avgRating * 25 +
+    chemistryTarget * 2 +
+    ratingTarget * 4 +
+    (requiredMatch ? 30 : 0);
+  const score =
+    mode === "chemistry_rating"
+      ? chemistryRatingScore
+      : mode === "rating_heavy"
+        ? ratingHeavyScore
+        : defaultScore;
   return { axis, groupId, score };
 };
 
@@ -5420,6 +5549,21 @@ const generateBaselineSeeds = (signature, players, squadSize, context) => {
   if (!hasUsefulSeedSignals) return [baselineSeed];
   const requiredSeeds = [];
   const exploratorySeeds = [];
+  const chemistryExplorationWanted = Boolean(
+    signature?.hasChemistry &&
+      (
+        (toNumber(signature?.totalChemistryTarget) ?? 0) >=
+          Math.max(22, Math.floor((toNumber(squadSize) ?? 11) * 2)) ||
+        signature?.sameLeagueMax != null ||
+        signature?.sameNationMax != null ||
+        signature?.sameClubMax != null ||
+        toNumber(signature?.ratingTarget) >= 74
+      ),
+  );
+  const ratingExplorationWanted = Boolean(
+    signature?.hasChemistry &&
+      (toNumber(signature?.ratingTarget) ?? 0) >= 74,
+  );
   for (const groupId of signature.requiredLeagueIds || []) {
     requiredSeeds.push(
       createSeedDescriptor({
@@ -5456,15 +5600,18 @@ const generateBaselineSeeds = (signature, players, squadSize, context) => {
   if (
     signature?.hasSameLeagueMin ||
     (signature?.requiredLeagueIds || []).length ||
-    (signature?.dominantAxes || []).includes("league")
+    (signature?.dominantAxes || []).includes("league") ||
+    chemistryExplorationWanted
   ) {
+    const defaultLeagueSeedCount =
+      chemistryExplorationWanted || ratingExplorationWanted ? 1 : 2;
     const leagues = Array.from(buildCountsMap(players, "leagueId").keys())
       .map((groupId) =>
         scoreGroupSeed(players, "league", groupId, signature, context, squadSize),
       )
       .filter(Boolean)
       .sort((a, b) => b.score - a.score)
-      .slice(0, 2);
+      .slice(0, defaultLeagueSeedCount);
     for (const entry of leagues) {
       exploratorySeeds.push(
         createSeedDescriptor({
@@ -5476,19 +5623,78 @@ const generateBaselineSeeds = (signature, players, squadSize, context) => {
         }),
       );
     }
+    if (chemistryExplorationWanted) {
+      const chemistryLeague = Array.from(buildCountsMap(players, "leagueId").keys())
+        .map((groupId) =>
+          scoreGroupSeed(
+            players,
+            "league",
+            groupId,
+            signature,
+            context,
+            squadSize,
+            "chemistry_rating",
+          ),
+        )
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 1);
+      for (const entry of chemistryLeague) {
+        exploratorySeeds.push(
+          createSeedDescriptor({
+            type: "chemistry_league",
+            axis: "league",
+            groupId: entry.groupId,
+            label: `Chem league ${entry.groupId}`,
+            strength: 5,
+          }),
+        );
+      }
+    }
+    if (ratingExplorationWanted) {
+      const ratingLeague = Array.from(buildCountsMap(players, "leagueId").keys())
+        .map((groupId) =>
+          scoreGroupSeed(
+            players,
+            "league",
+            groupId,
+            signature,
+            context,
+            squadSize,
+            "rating_heavy",
+          ),
+        )
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 1);
+      for (const entry of ratingLeague) {
+        exploratorySeeds.push(
+          createSeedDescriptor({
+            type: "rating_league",
+            axis: "league",
+            groupId: entry.groupId,
+            label: `Rating league ${entry.groupId}`,
+            strength: 5,
+          }),
+        );
+      }
+    }
   }
   if (
     signature?.hasSameNationMin ||
     (signature?.requiredNationIds || []).length ||
-    (signature?.dominantAxes || []).includes("nation")
+    (signature?.dominantAxes || []).includes("nation") ||
+    chemistryExplorationWanted
   ) {
+    const defaultNationSeedCount =
+      chemistryExplorationWanted || ratingExplorationWanted ? 1 : 2;
     const nations = Array.from(buildCountsMap(players, "nationId").keys())
       .map((groupId) =>
         scoreGroupSeed(players, "nation", groupId, signature, context, squadSize),
       )
       .filter(Boolean)
       .sort((a, b) => b.score - a.score)
-      .slice(0, 1);
+      .slice(0, defaultNationSeedCount);
     for (const entry of nations) {
       exploratorySeeds.push(
         createSeedDescriptor({
@@ -5500,10 +5706,66 @@ const generateBaselineSeeds = (signature, players, squadSize, context) => {
         }),
       );
     }
+    if (chemistryExplorationWanted) {
+      const chemistryNation = Array.from(buildCountsMap(players, "nationId").keys())
+        .map((groupId) =>
+          scoreGroupSeed(
+            players,
+            "nation",
+            groupId,
+            signature,
+            context,
+            squadSize,
+            "chemistry_rating",
+          ),
+        )
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 1);
+      for (const entry of chemistryNation) {
+        exploratorySeeds.push(
+          createSeedDescriptor({
+            type: "chemistry_nation",
+            axis: "nation",
+            groupId: entry.groupId,
+            label: `Chem nation ${entry.groupId}`,
+            strength: 5,
+          }),
+        );
+      }
+    }
+    if (ratingExplorationWanted) {
+      const ratingNation = Array.from(buildCountsMap(players, "nationId").keys())
+        .map((groupId) =>
+          scoreGroupSeed(
+            players,
+            "nation",
+            groupId,
+            signature,
+            context,
+            squadSize,
+            "rating_heavy",
+          ),
+        )
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 1);
+      for (const entry of ratingNation) {
+        exploratorySeeds.push(
+          createSeedDescriptor({
+            type: "rating_nation",
+            axis: "nation",
+            groupId: entry.groupId,
+            label: `Rating nation ${entry.groupId}`,
+            strength: 5,
+          }),
+        );
+      }
+    }
   }
   return dedupeSeeds([baselineSeed, ...requiredSeeds, ...exploratorySeeds]).slice(
     0,
-    4,
+    chemistryExplorationWanted || ratingExplorationWanted ? 8 : 4,
   );
 };
 
@@ -5992,20 +6254,22 @@ const runPipeline = (inputContext, seed = null, phaseConfig = null) => {
   const appliedFilters = [];
   const ignoredRequirements = [];
 
-  const ratingFillHint =
-    ratingRequirement &&
-    !chemistryRequired &&
-    toNumber(ratingRequirement.target) != null &&
-    ratingRequirement.target >= 80
-      ? {
-          // Keep the initial fill closer to the needed rating so we don't start from bronzes
-          // and then spend lots of time swapping up.
-          pivot: Math.max(
-            80,
-            Math.floor(toNumber(ratingRequirement.target) ?? 0) - 1,
-          ),
-        }
-      : null;
+  const ratingTargetValue = toNumber(ratingRequirement?.target);
+  const shouldUseRatingFillHint = Boolean(
+    ratingTargetValue != null &&
+      ((!chemistryRequired && ratingTargetValue >= 80) ||
+        (chemistryRequired && ratingTargetValue >= 78)),
+  );
+  const ratingFillHint = shouldUseRatingFillHint
+    ? {
+        // Keep the initial fill closer to the needed rating so chemistry-heavy
+        // composition puzzles do not lock into a cheap low-rating shell.
+        pivot: Math.max(
+          chemistryRequired ? 76 : 80,
+          Math.floor(ratingTargetValue ?? 0) - 1,
+        ),
+      }
+    : null;
 
   const uniqueMaxByAttr = new Map();
   const preferUniqueFill = context?.optimize?.preferUniqueFill === true;
@@ -6902,6 +7166,34 @@ const runPipeline = (inputContext, seed = null, phaseConfig = null) => {
     return failing;
   };
 
+  let finalDedupeReplaced = 0;
+  if (hasDuplicateDefinitions(squad, squadSize)) {
+    finalDedupeReplaced = enforceUniqueDefinitions(
+      squad,
+      pool,
+      rules,
+      squadSize,
+      debugPush,
+      {
+        chemistryRequired,
+        slotsForChemistry,
+        chemistryTargets,
+        currentChemistry: chemistry,
+      },
+    );
+    if (finalDedupeReplaced > 0) {
+      if (chemistryRequired) {
+        chemistry = computeChemistryEval(squad, slotsForChemistry, squadSize);
+      }
+      debugPush?.({
+        stage: "dedupe",
+        action: "final_summary",
+        replaced: finalDedupeReplaced,
+        remainingDefinitionIds: getDuplicateDefinitionKeys(squad, squadSize),
+      });
+    }
+  }
+
   let failingRequirements = buildFailingRequirements(squad, chemistry);
   let solved = failingRequirements.length === 0;
   let refinement = {
@@ -7186,6 +7478,43 @@ const runPipeline = (inputContext, seed = null, phaseConfig = null) => {
       }
     }
   }
+
+  if (hasDuplicateDefinitions(squad, squadSize)) {
+    const finalCleanupReplaced = enforceUniqueDefinitions(
+      squad,
+      pool,
+      rules,
+      squadSize,
+      debugPush,
+      {
+        chemistryRequired,
+        slotsForChemistry,
+        chemistryTargets,
+        currentChemistry: chemistry,
+      },
+    );
+    if (finalCleanupReplaced > 0) {
+      if (chemistryRequired) {
+        chemistry = computeChemistryEval(squad, slotsForChemistry, squadSize);
+      }
+      failingRequirements = buildFailingRequirements(squad, chemistry);
+      solved =
+        failingRequirements.length === 0 &&
+        !hasDuplicateDefinitions(squad, squadSize);
+      debugPush?.({
+        stage: "dedupe",
+        action: "post_optimize_summary",
+        replaced: finalCleanupReplaced,
+        remainingDefinitionIds: getDuplicateDefinitionKeys(squad, squadSize),
+      });
+    } else {
+      solved = false;
+    }
+  }
+
+  solved =
+    failingRequirements.length === 0 &&
+    !hasDuplicateDefinitions(squad, squadSize);
 
   const slotSolution =
     chemistryRequired && chemistry && slotsForChemistry.length >= squadSize
