@@ -1,0 +1,108 @@
+{
+  "type": "object",
+  "required": [
+    "generatedAt",
+    "benchmark",
+    "summary",
+    "results"
+  ],
+  "properties": {
+    "generatedAt": {
+      "type": "string"
+    },
+    "benchmark": {
+      "type": "object"
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "challengeCount": {
+          "type": "number"
+        },
+        "solvedCount": {
+          "type": "number"
+        },
+        "unsolvedCount": {
+          "type": "number"
+        },
+        "solveRatePct": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "mutualSolvedCountWithBaseline": {
+          "type": "number"
+        },
+        "meanAverageRatingDeltaVsBaseline": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "penaltyDeltaMeans": {
+          "type": "object",
+          "properties": {
+            "ratingExcess": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "maxRating": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "highRatingScore": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "highRatingCount": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "identityBalancePenalty": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "sumRating": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "specialCount": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "tradableCount": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "scarcityPenalty": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "results": {
+      "type": "array"
+    }
+  }
+}
