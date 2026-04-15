@@ -22,6 +22,11 @@ task_plan.md
 
 # Local replay reports
 replay-report-*.json
+benchmark-runs/
+syncflag.txt
+EAFC-SBC-Solver-Pack/
+OPEN-IN-LLM_EAFC-SBC-Solver-Workspace/
+RUN-AFTER-LLM_EAFC-SBC-Reference-Workspace/
 
 backup-project.ps1
 AGENT.md
