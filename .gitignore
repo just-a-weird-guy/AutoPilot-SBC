@@ -24,6 +24,7 @@ task_plan.md
 replay-report-*.json
 benchmark-runs/
 syncflag.txt
+EA-FC-SOLVER-TEST/
 EAFC-SBC-Solver-Pack/
 OPEN-IN-LLM_EAFC-SBC-Solver-Workspace/
 RUN-AFTER-LLM_EAFC-SBC-Reference-Workspace/
