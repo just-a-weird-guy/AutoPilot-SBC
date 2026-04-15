@@ -137,6 +137,8 @@ If you are not sure whether something fits the direction of the project, open th
 
 If you have been enjoying my work and would like to support what I do, you can find me over on [Ko-fi](https://ko-fi.com/P5P5YOUU7).
 
+More contribution notes live in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md).
+
 ## A Few Important Notes
 
 - This extension is tightly coupled to the EA FC Web App DOM and controllers, so upstream UI changes can break hooks or selectors.

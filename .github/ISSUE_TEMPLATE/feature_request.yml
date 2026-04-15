@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a feature, workflow improvement, or solver idea.
+title: "[Feature]: "
+labels: []
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Idea
+      description: What do you want to add or improve?
+      placeholder: Describe the feature or change you want to see.
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      placeholder: Explain what is annoying, missing, or limited right now.
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: How should it behave?
+      placeholder: Describe what the feature should do from a user point of view.
+    validations:
+      required: true
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Mockups, examples, or extra notes
+      description: Optional, but useful if you have screenshots, sketches, or examples from another tool.
+

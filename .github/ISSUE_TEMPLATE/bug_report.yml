@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a bug with solve behavior, fetching, UI, or automation.
+title: "[Bug]: "
+labels: []
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+      placeholder: A short summary of the issue.
+    validations:
+      required: true
+
+  - type: input
+    id: page_or_mode
+    attributes:
+      label: Page or solver mode
+      description: What page or flow were you using?
+      placeholder: Single solve, Multi, Solve Entire Set, Sequence Solver, settings page, etc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you do before the issue happened?
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. Run ...
+        4. See issue
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      placeholder: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      placeholder: What happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console logs
+      description: Paste any relevant console output here if this looks solve, fetch, or apply related.
+      render: shell
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Add screenshots if they help explain the issue.
+
