@@ -137,6 +137,8 @@ Small, focused pull requests are easier to review and safer to merge than large 
 
 If you are not sure whether something fits the direction of the project, open the issue anyway. I would rather have people throw ideas out there than hold back because they assume it is out of scope.
 
+If you have been enjoying my work and would like to support what I do, you can find me over on [Ko-fi](https://ko-fi.com/P5P5YOUU7).
+
 ## A Few Important Notes
 
 - This extension is tightly coupled to the EA FC Web App DOM and controllers, so upstream UI changes can break hooks or selectors.
