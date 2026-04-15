@@ -25,9 +25,7 @@ The main install source is now the Chrome Web Store.
 
 ### Chrome Web Store
 
-Install AutopilotSBC here:
-
-- https://chromewebstore.google.com/detail/autopilotsbc-fc26-sbc-sol/gkcjhdebgfhdbkecahbnpmcaobapcfbh?hl=en
+Install AutopilotSBC from the [Chrome Web Store](https://chromewebstore.google.com/detail/autopilotsbc-fc26-sbc-sol/gkcjhdebgfhdbkecahbnpmcaobapcfbh?hl=en).
 
 After installing, open the FC Web App and refresh the page if it was already open.
 
