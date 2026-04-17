@@ -1596,7 +1596,7 @@
         groups.set(defId, { hasClub: false, storageIds: [] });
       const entry = groups.get(defId);
       if (player?.isStorage) entry.storageIds.push(player.id);
-      else entry.hasClub = true;
+      else if (!player?.isUnassigned) entry.hasClub = true;
     }
     if (extraDefIds?.size) {
       for (const defId of extraDefIds) {
@@ -1648,27 +1648,93 @@
     return result?.data ?? { unSoldItems: [], availableItems: [] };
   };
 
-  const getUnassignedItems = async () => {
-    const lookup = services?.Item?.getUnassignedItems ?? null;
-    if (!lookup) return [];
-    const result = await observableToPromise(lookup(false));
-    return result?.data?.items ?? [];
+  const markItemsAsUnassigned = (items) => {
+    const list = Array.isArray(items) ? items : [];
+    for (const item of list) {
+      if (!item || typeof item !== "object") continue;
+      try {
+        if (item.isUnassigned == null) item.isUnassigned = true;
+      } catch {}
+    }
+    return list;
   };
 
-  const getDuplicatedDefIds = async (includeTransfer = false) => {
-    const unassigned = await getUnassignedItems();
+  const extractUnassignedItemsFromResult = (result) => {
+    const data = result?.data ?? result ?? null;
+    if (Array.isArray(data)) return markItemsAsUnassigned(data);
+    if (Array.isArray(data?.items)) return markItemsAsUnassigned(data.items);
+    if (Array.isArray(data?.data?.items))
+      return markItemsAsUnassigned(data.data.items);
+    if (Array.isArray(data?.models)) return markItemsAsUnassigned(data.models);
+    if (Array.isArray(data?.entries)) return markItemsAsUnassigned(data.entries);
+    if (Array.isArray(data?.list)) return markItemsAsUnassigned(data.list);
+    if (Array.isArray(data?._collection))
+      return markItemsAsUnassigned(data._collection);
+    return markItemsAsUnassigned([]);
+  };
+
+  const getUnassignedItems = async ({ refresh = false } = {}) => {
+    const lookup = services?.Item?.getUnassignedItems ?? null;
+    let initial = [];
+    if (typeof lookup === "function") {
+      try {
+        initial = extractUnassignedItemsFromResult(
+          await observableToPromise(lookup(false)),
+        );
+      } catch {
+        initial = [];
+      }
+    }
+
+    if (!refresh || typeof services?.Item?.requestUnassignedItems !== "function") {
+      return initial;
+    }
+
+    try {
+      const requested = extractUnassignedItemsFromResult(
+        await sbcApiCall(
+          "requestUnassignedItems",
+          () => observableToPromise(services.Item.requestUnassignedItems()),
+          { minGapMs: 400, maxAttempts: 1 },
+        ),
+      );
+      if (Array.isArray(requested) && requested.length) return requested;
+    } catch {}
+
+    if (typeof lookup === "function") {
+      try {
+        const refreshed = extractUnassignedItemsFromResult(
+          await observableToPromise(lookup(false)),
+        );
+        if (Array.isArray(refreshed) && refreshed.length) return refreshed;
+      } catch {}
+    }
+
+    return initial;
+  };
+
+  const buildDuplicateDefIdSet = (items = []) =>
+    new Set(
+      (items ?? [])
+        .filter((item) => item?.isDuplicate?.())
+        .map((item) => item?.definitionId)
+        .filter((value) => value != null),
+    );
+
+  const getDuplicatedDefIds = async (
+    includeTransfer = false,
+    { refreshUnassigned = false, unassignedItems = null } = {},
+  ) => {
+    const unassigned = Array.isArray(unassignedItems)
+      ? unassignedItems
+      : await getUnassignedItems({ refresh: refreshUnassigned });
     let extra = [];
     if (includeTransfer) {
       const { unSoldItems, availableItems } = await getTransferListItems();
       extra = (unSoldItems ?? []).concat(availableItems ?? []);
     }
     const all = (unassigned ?? []).concat(extra ?? []);
-    return new Set(
-      all
-        .filter((item) => item?.isDuplicate?.())
-        .map((item) => item?.definitionId)
-        .filter((value) => value != null),
-    );
+    return buildDuplicateDefIdSet(all);
   };
 
   const PLAYERS_FETCH_TTL_MS = 60 * 1000;
@@ -1679,6 +1745,7 @@
     ignoreLoaned: options?.ignoreLoaned !== false,
     onlyFemales: options?.onlyFemales === true,
     excludeActiveSquad: options?.excludeActiveSquad !== false,
+    includeUnassigned: options?.includeUnassigned === true,
     onlyUntradables: options?.onlyUntradables === true,
     onlyTradables: options?.onlyTradables === true,
     playerId: options?.playerId ?? null,
@@ -1696,20 +1763,108 @@
 
   const fetchPlayersSnapshot = async (options = {}) => {
     const normalized = normalizePlayersFetchOptions(options);
-    const duplicateDefIds = await getDuplicatedDefIds(true);
-    const [clubPlayers, storagePlayers] = await Promise.all([
-      getClubPlayers({ ...normalized, duplicateDefIds }),
+    const includeUnassigned = normalized.includeUnassigned === true;
+    const unassignedItems = await getUnassignedItems({
+      refresh: includeUnassigned,
+    });
+    const duplicateDefIds = await getDuplicatedDefIds(true, {
+      refreshUnassigned: false,
+      unassignedItems,
+    });
+    const activeSquadDefIds =
+      includeUnassigned && normalized.excludeActiveSquad
+        ? new Set(await getActiveSquadPlayerIds())
+        : null;
+    const clubFetchOptions = {
+      ...normalized,
+      duplicateDefIds,
+      excludeActiveSquad:
+        activeSquadDefIds instanceof Set ? false : normalized.excludeActiveSquad,
+    };
+    const [rawClubPlayers, rawStoragePlayers, rawUnassignedPlayers] =
+      await Promise.all([
+        getClubPlayers(clubFetchOptions),
       getStoragePlayers(duplicateDefIds),
-    ]);
+        includeUnassigned
+          ? Promise.resolve(
+              (unassignedItems ?? [])
+                .filter((player) => !player?.isEnrolledInAcademy?.())
+                .map((player) =>
+                  toPlainPlayer(player, {
+                    duplicateDefIds,
+                    source: "unassigned",
+                  }),
+                ),
+            )
+          : Promise.resolve([]),
+      ]);
+    const storageDefIds = new Set(
+      (rawStoragePlayers ?? [])
+        .map((player) => player?.definitionId ?? null)
+        .filter((value) => value != null),
+    );
+    const clubDefIds = new Set(
+      (rawClubPlayers ?? [])
+        .map((player) => player?.definitionId ?? null)
+        .filter((value) => value != null),
+    );
+    const clubPlayers = (rawClubPlayers ?? [])
+      .map((player) => {
+        const defId = player?.definitionId ?? null;
+        const isActiveSquadDef =
+          defId != null &&
+          activeSquadDefIds instanceof Set &&
+          (activeSquadDefIds.has(defId) || activeSquadDefIds.has(String(defId)));
+        return {
+        ...player,
+        isActiveSquadDef,
+        hasStorageDuplicate:
+          defId != null &&
+          (storageDefIds.has(defId) || storageDefIds.has(String(defId))),
+        hasClubDuplicate: false,
+      };
+      })
+      .filter((player) => {
+        if (!player?.isActiveSquadDef) return true;
+        const defId = player?.definitionId ?? null;
+        return (
+          defId != null &&
+          (duplicateDefIds.has(defId) || duplicateDefIds.has(String(defId)))
+        );
+      });
+    const storagePlayers = (rawStoragePlayers ?? []).map((player) => {
+      const defId = player?.definitionId ?? null;
+      return {
+        ...player,
+        hasStorageDuplicate: false,
+        hasClubDuplicate:
+          defId != null && (clubDefIds.has(defId) || clubDefIds.has(String(defId))),
+      };
+    });
+    const unassignedPlayers = (rawUnassignedPlayers ?? []).map((player) => {
+      const defId = player?.definitionId ?? null;
+      return {
+        ...player,
+        hasStorageDuplicate:
+          defId != null &&
+          (storageDefIds.has(defId) || storageDefIds.has(String(defId))),
+        hasClubDuplicate:
+          defId != null && (clubDefIds.has(defId) || clubDefIds.has(String(defId))),
+      };
+    });
     cacheExcludedPlayerNames(clubPlayers);
     cacheExcludedPlayerNames(storagePlayers);
+    cacheExcludedPlayerNames(unassignedPlayers);
     cacheLeagueMetaFromPlayers(clubPlayers);
     cacheLeagueMetaFromPlayers(storagePlayers);
+    cacheLeagueMetaFromPlayers(unassignedPlayers);
     cacheNationMetaFromPlayers(clubPlayers);
     cacheNationMetaFromPlayers(storagePlayers);
+    cacheNationMetaFromPlayers(unassignedPlayers);
     return {
       clubPlayers,
       storagePlayers,
+      unassignedPlayers,
       duplicateDefIds,
       fetchedAt: new Date().toISOString(),
     };
@@ -1896,7 +2051,15 @@
       services?.Item?.UTItemPileEnum ?? window?.UTItemPileEnum ?? {};
     const clubPile = ItemPile.CLUB ?? 7;
     const storagePile = ItemPile.STORAGE ?? 10;
-    const movable = items.filter((item) => item?.pile === storagePile);
+    const unassignedPile = ItemPile.UNASSIGNED ?? null;
+    const movable = items.filter((item) => {
+      const pile = item?.pile ?? null;
+      if (Boolean(item?.isUnassigned)) return true;
+      if (pile == null || pile === clubPile) return false;
+      if (pile === storagePile) return true;
+      if (unassignedPile != null && pile === unassignedPile) return true;
+      return false;
+    });
     if (!movable.length) return 0;
     await observableToPromise(services.Item.move(movable, clubPile));
     await delay(0.5);
@@ -1952,11 +2115,25 @@
 
   const getSquadLookupForSbc = async (key = "id", options = {}) => {
     const { raw = false, ...lookupOptions } = options ?? {};
-    const [clubPlayers, storagePlayers] = await Promise.all([
+    const includeUnassigned = lookupOptions?.includeUnassigned === true;
+    const [clubPlayers, storagePlayers, unassignedPlayers] = await Promise.all([
       raw ? getClubItems(lookupOptions) : getClubPlayers(lookupOptions),
       raw
         ? getStorageItems(lookupOptions)
         : getStoragePlayers(null, lookupOptions),
+      includeUnassigned
+        ? raw
+          ? getUnassignedItems({
+              refresh: lookupOptions?.refreshUnassigned === true,
+            })
+          : getUnassignedItems({
+              refresh: lookupOptions?.refreshUnassigned === true,
+            }).then((items) =>
+              (items ?? [])
+                .filter((player) => !player?.isEnrolledInAcademy?.())
+                .map((player) => toPlainPlayer(player, { source: "unassigned" })),
+            )
+        : Promise.resolve([]),
     ]);
     const lookup = new Map();
     for (const player of clubPlayers) {
@@ -1966,6 +2143,12 @@
       addPlayerToLookup(lookup, id, player);
     }
     for (const player of storagePlayers) {
+      if (!player) continue;
+      if (player?.isEnrolledInAcademy?.()) continue;
+      const id = player[key] ?? player.id;
+      addPlayerToLookup(lookup, id, player);
+    }
+    for (const player of unassignedPlayers) {
       if (!player) continue;
       if (player?.isEnrolledInAcademy?.()) continue;
       const id = player[key] ?? player.id;
@@ -2007,13 +2190,31 @@
     if (!playerIds.length) return null;
 
     const { raw = false, ...lookupOptions } = options ?? {};
-    const [clubPlayers, storagePlayers] = await Promise.all([
+    const includeUnassigned = lookupOptions?.includeUnassigned === true;
+    const [clubPlayers, storagePlayers, unassignedPlayers] = await Promise.all([
       raw
         ? getClubItems({ ...lookupOptions, playerIds })
         : getClubPlayers({ ...lookupOptions, playerIds }),
       raw
         ? getStorageItems({ ...lookupOptions, playerIds })
         : getStoragePlayers(null, { ...lookupOptions, playerIds }),
+      includeUnassigned
+        ? getUnassignedItems({
+            refresh: lookupOptions?.refreshUnassigned === true,
+          }).then((items) => {
+            const filtered = (items ?? []).filter((player) => {
+              const defId = player?.definitionId ?? null;
+              return (
+                defId != null &&
+                (defIdSet.has(defId) || defIdSet.has(String(defId)))
+              );
+            });
+            if (raw) return filtered;
+            return filtered
+              .filter((player) => !player?.isEnrolledInAcademy?.())
+              .map((player) => toPlainPlayer(player, { source: "unassigned" }));
+          })
+        : Promise.resolve([]),
     ]);
     const lookup = new Map();
     for (const player of clubPlayers) {
@@ -2023,6 +2224,12 @@
       addPlayerToLookup(lookup, id, player);
     }
     for (const player of storagePlayers) {
+      if (!player) continue;
+      if (player?.isEnrolledInAcademy?.()) continue;
+      const id = player[key] ?? player.id;
+      addPlayerToLookup(lookup, id, player);
+    }
+    for (const player of unassignedPlayers) {
       if (!player) continue;
       if (player?.isEnrolledInAcademy?.()) continue;
       const id = player[key] ?? player.id;
@@ -2339,6 +2546,16 @@
       retryMissingCount: 0,
       preApplyLoadSkipped: false,
     };
+    const usesUnassignedLookup = (ids || []).some((id) => {
+      const key = String(id);
+      const player =
+        playerById?.get?.(key) ??
+        playerById?.get?.(id) ??
+        playerById?.[key] ??
+        playerById?.[id] ??
+        null;
+      return Boolean(player?.isUnassigned || player?.isDuplicate);
+    });
     const withPerf = async (msKey, countKey, fn) => {
       const startedAt = Date.now();
       try {
@@ -2355,9 +2572,14 @@
     // the result and forcing a refresh only after a confirmed move we cut
     // most apply runs from 1-4 full scans down to 1.
     const lookupTelemetry = {};
-    const lookupOpts = createApplyLookupOptions({
-      telemetry: lookupTelemetry,
-    });
+    const lookupOpts = {
+      ...createApplyLookupOptions({
+        telemetry: lookupTelemetry,
+      }),
+      includeUnassigned: usesUnassignedLookup,
+      refreshUnassigned: usesUnassignedLookup,
+      excludeActiveSquad: usesUnassignedLookup ? false : true,
+    };
     let cachedLookup = null;
     let lookupFetchCount = 0;
     const requestedIds = (ids || []).filter((id) => id != null);
@@ -2835,11 +3057,8 @@
           effectiveLookup?.get(id) ?? effectiveLookup?.get(String(id)) ?? null,
       )
       .filter(Boolean);
-    const moveCandidates = resolvedItems.filter(
-      (item) => item?.pile === storagePile,
-    );
     const movedCount = await withPerf("moveMs", "moveCount", () =>
-      moveItemsToClub(moveCandidates),
+      moveItemsToClub(resolvedItems),
     );
     if (movedCount > 0) {
       perf.movedItemCount += movedCount;
@@ -3197,10 +3416,30 @@
     }
 
     const liveSquad = challenge.squad;
+    const resolvedItems = ids
+      .map((id) => experimentLookupById(applyLookup, id))
+      .filter(Boolean);
+    const movedCount = await moveItemsToClub(resolvedItems);
+    let effectiveLookup = applyLookup;
+    if (movedCount > 0 && typeof getLookup === "function") {
+      try {
+        const refreshedLookup = await getLookup();
+        if (refreshedLookup instanceof Map) {
+          const refreshedApplyLookup = new Map();
+          for (const id of ids) {
+            const match = experimentLookupById(refreshedLookup, id);
+            if (!match || match.id == null) continue;
+            refreshedApplyLookup.set(match.id, match);
+            refreshedApplyLookup.set(String(match.id), match);
+          }
+          if (refreshedApplyLookup.size) effectiveLookup = refreshedApplyLookup;
+        }
+      } catch {}
+    }
     const playersForSet = buildPreservedSlotList(
       liveSquad,
       ids,
-      applyLookup.size ? applyLookup : resolvedLookup,
+      effectiveLookup.size ? effectiveLookup : resolvedLookup,
       slotSolution ?? null,
       preserveExistingValid,
     );
@@ -3211,21 +3450,14 @@
     const loaded = await loadChallenge(challenge, true, { force: true });
     const loadedItems = experimentGetLoadedItems(loaded, challenge);
     const loadedItemsForUi = experimentGetLoadedUiItems(loaded, challenge);
-    const finalItemsForUi =
-      loadedItemsForUi.length > 0 ? loadedItemsForUi : playersForSet;
-    if (finalItemsForUi.length > 0) {
-      liveSquad.setPlayers(finalItemsForUi, true);
-    }
+    liveSquad.setPlayers(loadedItemsForUi, true);
     try {
       challenge.squad = liveSquad;
     } catch {}
     try {
       challenge.onDataChange?.notify?.({ squad: liveSquad });
     } catch {}
-    const hydratedCount =
-      loadedItems.length ||
-      playersForSet.filter((item) => experimentIsRealItem(item)).length;
-    const appliedCount = hydratedCount;
+    const appliedCount = loadedItems.length;
     const isPartialApply = appliedCount < ids.length;
     try {
       onApplied?.({
@@ -3235,6 +3467,8 @@
         concepts: conceptIds.length,
         missing: missingIds.length,
         partial: isPartialApply,
+        movedToClub: movedCount,
+        saveSuccess: saveResult?.success === true,
       });
     } catch {}
 
@@ -3244,6 +3478,7 @@
       saveResult,
       requested: ids.length,
       appliedCount,
+      movedToClub: movedCount,
       conceptIds,
       missingIds,
       usedLookup: true,
@@ -3273,8 +3508,23 @@
     const lookupKey = options?.lookupKey ?? "id";
     const playerById = options?.playerById ?? null;
     const startedAt = Date.now();
+    const usesUnassignedLookup = ids.some((id) => {
+      const key = String(id);
+      const player =
+        playerById?.get?.(key) ??
+        playerById?.get?.(id) ??
+        playerById?.[key] ??
+        playerById?.[id] ??
+        null;
+      return Boolean(player?.isUnassigned || player?.isDuplicate);
+    });
     const warmLookup = readWarmApplyLookup(lookupKey, ids);
-    const lookupOptions = createApplyLookupOptions();
+    const lookupOptions = {
+      ...createApplyLookupOptions(),
+      includeUnassigned: usesUnassignedLookup,
+      refreshUnassigned: usesUnassignedLookup,
+      excludeActiveSquad: usesUnassignedLookup ? false : true,
+    };
     let targetedLookup = null;
     if (!warmLookup) {
       try {
@@ -3282,7 +3532,12 @@
           ids,
           playerById,
           lookupKey,
-          createTargetedApplyLookupOptions(),
+          {
+            ...createTargetedApplyLookupOptions(),
+            includeUnassigned: usesUnassignedLookup,
+            refreshUnassigned: usesUnassignedLookup,
+            excludeActiveSquad: usesUnassignedLookup ? false : true,
+          },
         );
       } catch (error) {
         log("debug", "[EA Data] Targeted lookup failed", {
@@ -9345,8 +9600,10 @@
         }
 
         setStatus("Fetching players...");
+        const includeUnassigned = Boolean(getPoolSettingsFromInputs()?.useUnassigned);
         const payload = await window.eaData.getSolverPayload({
           ignoreLoaned: true,
+          includeUnassigned,
         });
         if (shouldAbort()) {
           setStatus("Stopped.");
@@ -12501,8 +12758,10 @@
         }
 
         setStatus("Fetching players...");
+        const includeUnassigned = Boolean(getPoolSettingsFromInputs()?.useUnassigned);
         const payload = await window.eaData.getSolverPayload({
           ignoreLoaned: true,
+          includeUnassigned,
         });
         if (shouldAbort()) {
           setStatus("Stopped.");
@@ -13528,14 +13787,6 @@
                     "[EA Data] Smart re-solve: concept card detected, re-solving",
                     { challengeName },
                   );
-                  const freshPayload = await window.eaData.getSolverPayload({
-                    ignoreLoaned: true,
-                    forcePlayersFetch: true,
-                    preferWarmSnapshot: false,
-                  });
-                  const freshPlayers = Array.isArray(freshPayload?.players)
-                    ? freshPayload.players
-                    : [];
                   let reSolveSettings = null;
                   try {
                     reSolveSettings =
@@ -13547,6 +13798,15 @@
                     ...reSolveSettings,
                     ...getPoolSettingsFromInputs(),
                   };
+                  const freshPayload = await window.eaData.getSolverPayload({
+                    ignoreLoaned: true,
+                    forcePlayersFetch: true,
+                    preferWarmSnapshot: false,
+                    includeUnassigned: Boolean(reSolveEffective?.useUnassigned),
+                  });
+                  const freshPlayers = Array.isArray(freshPayload?.players)
+                    ? freshPayload.players
+                    : [];
                   const {
                     filteredPlayers: reSolvePlayers,
                     poolFilters: reSolvePoolFilters,
@@ -17405,10 +17665,14 @@
         );
 
         setRuntimeStatus("Fetching players...");
+        const includeUnassigned = enabledSteps.some((step) =>
+          shouldIncludeUnassignedPlayers(step?.settingsSnapshot),
+        );
         const payload = await window.eaData.getSolverPayload(
           {
             ignoreLoaned: true,
             preferWarmSnapshot: true,
+            includeUnassigned,
           },
           allSetIds,
         );
@@ -18637,6 +18901,13 @@
     button.addEventListener("click", async () => {
       console.log("[EA Data] Solve Squad clicked");
       try {
+        let solverSettings = null;
+        try {
+          solverSettings =
+            await getSolverSettingsForChallenge(startedChallengeId);
+        } catch {
+          solverSettings = getDefaultSolverSettings();
+        }
         dismissToast(activeProgressToast);
       } catch {}
       activeProgressToast = showToast({
@@ -18649,8 +18920,16 @@
       button.disabled = true;
       showLoadingOverlay("Fetching players...");
       try {
+        let solverSettings = null;
+        try {
+          solverSettings =
+            await getSolverSettingsForChallenge(startedChallengeId);
+        } catch {
+          solverSettings = getDefaultSolverSettings();
+        }
         const payload = await window.eaData.getSolverPayload({
           ignoreLoaned: true,
+          includeUnassigned: Boolean(solverSettings?.useUnassigned),
         });
         if (
           startedChallengeId != null &&
@@ -18713,14 +18992,6 @@
         });
         const { safeRequirements, safeRequirementsNormalized } =
           serializeSolveRequirements(payload?.openChallenge ?? null);
-
-        let solverSettings = null;
-        try {
-          solverSettings =
-            await getSolverSettingsForChallenge(startedChallengeId);
-        } catch {
-          solverSettings = getDefaultSolverSettings();
-        }
 
         const requiredIds = new Set();
         try {
@@ -18835,6 +19106,7 @@
             ignoreLoaned: true,
             forcePlayersFetch: true,
             preferWarmSnapshot: false,
+            includeUnassigned: Boolean(solverSettings?.useUnassigned),
           });
           if (
             startedChallengeId != null &&
@@ -19629,7 +19901,7 @@
       path: SETTINGS_PATHS.SOLVER_USE_UNASSIGNED,
       idSuffix: "use-unassigned",
       label: "Use Unassigned",
-      help: "Allow duplicate items from Unassigned and transfer pile to bypass pool filters.",
+      help: "Allow Unassigned players into solver pools, and let duplicate-backed club copies bypass normal pool filters.",
       scopes: Object.freeze(["challenge", "global", "multi", "set"]),
       legacyKeys: Object.freeze(["useDupes"]),
     }),
@@ -19638,7 +19910,7 @@
       path: SETTINGS_PATHS.SOLVER_ONLY_STORAGE,
       idSuffix: "only-storage",
       label: "Only Storage",
-      help: "Restrict normal pool selection to SBC storage items.",
+      help: "Restrict normal pool selection to players that also have a matching copy in SBC storage.",
       scopes: Object.freeze(["challenge", "global", "multi", "set"]),
       legacyKeys: Object.freeze([]),
     }),
@@ -19725,6 +19997,14 @@
     }
     return normalized;
   };
+
+  const shouldIncludeUnassignedPlayers = (settings) =>
+    Boolean(
+      normalizeSolverPoolSettingsInput(
+        settings,
+        getDefaultSolverPoolSettings(),
+      )?.useUnassigned,
+    );
 
   const renderSolverToggleFields = ({ scope = null, idPrefix = "" } = {}) => {
     const defs = getSolverToggleFieldDefsForScope(scope);
@@ -21407,6 +21687,14 @@
     }
 
     const source = Array.isArray(players) ? players : [];
+    const hasStorageLinkMetadata = source.some(
+      (player) =>
+        player?.hasStorageDuplicate === true || player?.hasClubDuplicate === true,
+    );
+    const isOnlyStorageEligible = (player) =>
+      hasStorageLinkMetadata
+        ? Boolean(player?.hasStorageDuplicate || player?.hasClubDuplicate)
+        : Boolean(player?.isStorage);
     const filteredPlayers = source.filter((player) => {
       const id = player?.id ?? null;
       if (id != null && excludedPlayerIdSet.has(String(id))) return false;
@@ -21423,8 +21711,10 @@
       if (!useEvolutionPlayers && isEvolutionPlayer(player)) return false;
       const isTotw = isTotwPlayer(player);
       if (!useTotwPlayers && isTotw) return false;
-      if (useUnassigned && player?.isDuplicate) return true;
-      if (onlyStorage && !player?.isStorage) return false;
+      if (useUnassigned && (player?.isDuplicate || player?.isUnassigned)) {
+        return true;
+      }
+      if (onlyStorage && !isOnlyStorageEligible(player)) return false;
       if (excludeTradable && Boolean(player?.isTradeable)) return false;
       if (excludeSpecial && Boolean(player?.isSpecial) && !isTotw) return false;
       const rating = readNumeric(player?.rating);
@@ -24549,12 +24839,19 @@
       : [];
 
     const storagePile = services?.Item?.UTItemPileEnum?.STORAGE ?? 10;
+    const unassignedPile = services?.Item?.UTItemPileEnum?.UNASSIGNED ?? null;
     const isStorage =
       source === "storage"
         ? true
         : source === "club"
           ? false
           : item.pile === storagePile;
+    const isUnassigned =
+      source === "unassigned"
+        ? true
+        : unassignedPile != null
+          ? item.pile === unassignedPile
+          : false;
     const isUntradeable =
       typeof item.isTradeable === "function"
         ? !item.isTradeable()
@@ -24577,6 +24874,9 @@
       isTradeable: item.isTradeable?.(),
       isUntradeable,
       isStorage,
+      isUnassigned,
+      hasStorageDuplicate: false,
+      hasClubDuplicate: false,
       isDuplicate,
       rating: item.rating,
       leagueId: item.leagueId,
@@ -25048,7 +25348,12 @@
           warmSnapshotReuseMs,
         });
       }
-      const { clubPlayers, storagePlayers, duplicateDefIds } =
+      const {
+        clubPlayers,
+        storagePlayers,
+        unassignedPlayers,
+        duplicateDefIds,
+      } =
         await ensurePlayersSnapshot(solverOptions, {
           force: forcePlayersFetch && !canReuseWarmSnapshot,
         });
@@ -25169,6 +25474,7 @@
         : [];
       const mergedPlayers = clubPlayers
         .concat(filteredStoragePlayers)
+        .concat(Array.isArray(unassignedPlayers) ? unassignedPlayers : [])
         .filter((player) => !player?.isEnrolledInAcademy);
       const excludedStorageIds = buildExcludedStorageIds(
         mergedPlayers,
@@ -25177,6 +25483,7 @@
       return {
         clubPlayers,
         storagePlayers: filteredStoragePlayers,
+        unassignedPlayers,
         players: mergedPlayers,
         _cacheRevision: Number(playersFetchCacheRevision ?? 0),
         openChallenge: openReq,
@@ -25205,14 +25512,14 @@
         options,
       ),
     fetchAll: async (options, setIds) => {
-      const { clubPlayers, storagePlayers } =
+      const { clubPlayers, storagePlayers, unassignedPlayers } =
         await ensurePlayersSnapshot(options);
       const includeChallenges = options?.includeChallenges === true;
       const sbcChallenges =
         includeChallenges && setIds?.length
           ? await getChallengesBySetIds(setIds)
           : [];
-      return { clubPlayers, storagePlayers, sbcChallenges };
+      return { clubPlayers, storagePlayers, unassignedPlayers, sbcChallenges };
     },
     triggerFetch: (options = {}, setIds = [], { silent = false } = {}) =>
       window.eaData.fetchAll(options, setIds).then((data) => {
@@ -25220,6 +25527,7 @@
           console.log("[EA Data] Fetch triggered", data);
           console.log("[EA Data] Club players", data.clubPlayers);
           console.log("[EA Data] Storage players", data.storagePlayers);
+          console.log("[EA Data] Unassigned players", data.unassignedPlayers);
           console.log("[EA Data] SBC challenges", data.sbcChallenges);
         }
         return data;

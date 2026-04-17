@@ -112,15 +112,15 @@ const ENUM_TO_TYPE = {
 };
 
 const FILTER_PRIORITY = [
-  "player_level",
-  "player_quality",
-  "player_inform",
   "nation_id",
   "league_id",
   "club_id",
   "same_nation_count",
   "same_league_count",
   "same_club_count",
+  "player_level",
+  "player_quality",
+  "player_inform",
   "player_rarity",
   "player_rarity_group",
   "player_rarity_or_totw",
@@ -343,6 +343,9 @@ const normalizePlayers = (players) => {
       quality: getPlayerQuality(rating),
       rarityName,
       isStorage: Boolean(item.isStorage),
+      isUnassigned: Boolean(item.isUnassigned),
+      hasStorageDuplicate: Boolean(item.hasStorageDuplicate),
+      hasClubDuplicate: Boolean(item.hasClubDuplicate),
       isUntradeable: Boolean(item.isUntradeable),
       isDuplicate: Boolean(item.isDuplicate),
       isSpecial,
@@ -435,6 +438,7 @@ export const buildSolverContext = ({
     onlyStorage: toBooleanSetting(filters?.onlyStorage, false),
     onlyUntradeables: toBooleanSetting(filters?.onlyUntradeables, false),
     onlyDuplicates: toBooleanSetting(filters?.onlyDuplicates, false),
+    useUnassigned: toBooleanSetting(filters?.useUnassigned, false),
     excludeSpecial: toBooleanSetting(filters?.excludeSpecial, false),
     useTotwPlayers: toBooleanSetting(filters?.useTotwPlayers, true),
     useEvolutionPlayers: toBooleanSetting(filters?.useEvolutionPlayers, false),
@@ -445,12 +449,19 @@ export const buildSolverContext = ({
   };
 
   let normalizedPlayers = normalizePlayers(players);
+  const hasStorageLinkMetadata = normalizedPlayers.some(
+    (player) =>
+      player?.hasStorageDuplicate === true || player?.hasClubDuplicate === true,
+  );
   const lockedSlotPlayerIds = collectLockedPlayerIdsFromSlots(squadSlots);
   const excludedIds = new Set(
     (normalizedFilters?.excludedPlayerIds ?? [])
       .map((value) => (value == null ? null : String(value)))
       .filter(Boolean),
   );
+  const isUnassignedBypass = (player) =>
+    normalizedFilters.useUnassigned &&
+    Boolean(player?.isDuplicate || player?.isUnassigned);
   if (excludedIds.size) {
     normalizedPlayers = normalizedPlayers.filter((player) => {
       if (player?.id == null) return true;
@@ -465,11 +476,17 @@ export const buildSolverContext = ({
     });
   }
   if (normalizedFilters.onlyStorage) {
-    normalizedPlayers = normalizedPlayers.filter((player) => player.isStorage);
+    normalizedPlayers = normalizedPlayers.filter((player) =>
+      isUnassignedBypass(player)
+        ? true
+        : hasStorageLinkMetadata
+          ? Boolean(player?.hasStorageDuplicate || player?.hasClubDuplicate)
+          : Boolean(player?.isStorage),
+    );
   }
   if (normalizedFilters.onlyUntradeables) {
     normalizedPlayers = normalizedPlayers.filter(
-      (player) => player.isUntradeable,
+      (player) => isUnassignedBypass(player) || player.isUntradeable,
     );
   }
   if (normalizedFilters.onlyDuplicates) {
@@ -486,6 +503,7 @@ export const buildSolverContext = ({
   }
   if (normalizedFilters.excludeSpecial) {
     normalizedPlayers = normalizedPlayers.filter((player) => {
+      if (isUnassignedBypass(player)) return true;
       if (!player?.isSpecial || player?.isTotw) return true;
       if (player?.id == null) return false;
       return lockedSlotPlayerIds.has(String(player.id));
@@ -989,6 +1007,253 @@ const getPrefillBiasBoost = (prefillBias, attr, group) => {
   return Math.max(1, toNumber(prefillBias.strength) ?? 3) * 1000;
 };
 
+const getDistinctAttrCounts = (players, attr) => {
+  const counts = new Map();
+  for (const player of players || []) {
+    const value = player?.[attr];
+    if (value == null) continue;
+    counts.set(value, (counts.get(value) || 0) + 1);
+  }
+  return counts;
+};
+
+const getDominantAttrCount = (players, attr) => {
+  let max = 0;
+  for (const count of getDistinctAttrCounts(players, attr).values()) {
+    if (count > max) max = count;
+  }
+  return max;
+};
+
+const getCoverageWithinDistinctLimit = (players, attr, limit) => {
+  const maxDistinct = toNumber(limit);
+  if (maxDistinct == null || maxDistinct <= 0) return 0;
+  const counts = Array.from(getDistinctAttrCounts(players, attr).values()).sort(
+    (a, b) => b - a,
+  );
+  if (!Number.isFinite(maxDistinct)) {
+    return counts.reduce((total, count) => total + count, 0);
+  }
+  return counts
+    .slice(0, maxDistinct)
+    .reduce((total, count) => total + count, 0);
+};
+
+const getDistinctNeededForCoverage = (players, attr, requiredCount) => {
+  const target = toNumber(requiredCount);
+  if (target == null || target <= 0) return 0;
+  const counts = Array.from(getDistinctAttrCounts(players, attr).values()).sort(
+    (a, b) => b - a,
+  );
+  let covered = 0;
+  for (let index = 0; index < counts.length; index += 1) {
+    covered += counts[index];
+    if (covered >= target) return index + 1;
+  }
+  return null;
+};
+
+const getSameAxisMinTarget = (signature, axis, squadSize = null) => {
+  const squadCap = Math.max(1, toNumber(squadSize) ?? Infinity);
+  const rawTarget =
+    axis === "league"
+      ? toNumber(signature?.sameLeagueMin)
+      : axis === "nation"
+        ? toNumber(signature?.sameNationMin)
+        : axis === "club"
+          ? toNumber(signature?.sameClubMin)
+          : null;
+  if (rawTarget == null || rawTarget <= 0) return null;
+  return Math.min(rawTarget, squadCap);
+};
+
+const getUniqueCountLimitForAttr = (signature, attr) => {
+  if (attr === "nationId") return toNumber(signature?.nationCountMax);
+  if (attr === "leagueId") return toNumber(signature?.leagueCountMax);
+  if (attr === "teamId") return toNumber(signature?.clubCountMax);
+  return null;
+};
+
+const getCrossAxisTargetDescriptors = (signature) => {
+  const descriptors = [];
+  const sameLeagueMin = toNumber(signature?.sameLeagueMin) ?? 0;
+  const sameNationMin = toNumber(signature?.sameNationMin) ?? 0;
+  const sameClubMin = toNumber(signature?.sameClubMin) ?? 0;
+  if (sameLeagueMin > 0) {
+    descriptors.push({ axis: "league", attr: "leagueId", target: sameLeagueMin });
+  }
+  if (sameNationMin > 0) {
+    descriptors.push({ axis: "nation", attr: "nationId", target: sameNationMin });
+  }
+  if (sameClubMin > 0) {
+    descriptors.push({ axis: "club", attr: "teamId", target: sameClubMin });
+  }
+  return descriptors;
+};
+
+// Composition seeds cannot be ranked only by raw pool size. Tight unique caps
+// like "max 2 nations" change which league/nation basins are actually viable.
+const scoreGroupCompositionFit = (players, axis, signature, squadSize = null) => {
+  const groupPlayers = Array.isArray(players) ? players : [];
+  if (!groupPlayers.length || !axis || !signature) return 0;
+  const axisAttr = AXIS_TO_ATTR[axis] ?? null;
+  const axisTarget = getSameAxisMinTarget(signature, axis, squadSize);
+  let score = 0;
+
+  if (axisAttr && axisTarget != null && axisTarget > 0) {
+    for (const crossAttr of ["nationId", "leagueId", "teamId"]) {
+      if (crossAttr === axisAttr) continue;
+      const distinctLimit = getUniqueCountLimitForAttr(signature, crossAttr);
+      if (distinctLimit == null || distinctLimit <= 0 || !Number.isFinite(distinctLimit)) {
+        continue;
+      }
+      const coverage = getCoverageWithinDistinctLimit(
+        groupPlayers,
+        crossAttr,
+        distinctLimit,
+      );
+      const distinctNeeded = getDistinctNeededForCoverage(
+        groupPlayers,
+        crossAttr,
+        axisTarget,
+      );
+      if (coverage < axisTarget) {
+        score -= (axisTarget - coverage) * 220;
+      } else {
+        score += coverage * 6;
+      }
+      if (distinctNeeded != null) {
+        score += Math.max(0, axisTarget + 2 - distinctNeeded) * 22;
+      }
+    }
+  }
+
+  for (const descriptor of getCrossAxisTargetDescriptors(signature)) {
+    if (descriptor.axis === axis) continue;
+    const dominantCount = getDominantAttrCount(groupPlayers, descriptor.attr);
+    score += dominantCount * 10;
+    const cappedTarget = Math.min(
+      descriptor.target,
+      Math.max(1, toNumber(squadSize) ?? descriptor.target),
+    );
+    if (dominantCount < cappedTarget) {
+      score -= (cappedTarget - dominantCount) * 18;
+    }
+  }
+
+  return score;
+};
+
+const getGroupRuleFitWeight = (rule) => {
+  switch (rule?.type) {
+    case "player_level":
+    case "player_quality":
+      return 34;
+    case "player_rarity":
+    case "player_rarity_group":
+    case "player_rarity_or_totw":
+      return 32;
+    case "player_inform":
+      return 38;
+    case "first_owner_players_count":
+    case "player_tradability":
+      return 18;
+    default:
+      return 12;
+  }
+};
+
+// Same-group selection cannot be based only on chemistry structure. Once a challenge
+// reserves most of the squad for one league/nation/club, that basin also needs enough
+// quota supply (gold, rare, informs, etc.) to finish the squad with the few outside
+// slots that remain.
+const scoreGroupRuleFit = (
+  players,
+  rules,
+  signature,
+  axis,
+  squadSize = null,
+  currentSquad = [],
+  requiredSameCount = null,
+) => {
+  const groupPlayers = Array.isArray(players) ? players : [];
+  const ruleList = Array.isArray(rules) ? rules : [];
+  if (!groupPlayers.length || !ruleList.length || !axis) return 0;
+  const squadCap = Math.max(1, toNumber(squadSize) ?? groupPlayers.length);
+  const axisTarget = Math.max(
+    0,
+    Math.min(
+      squadCap,
+      toNumber(requiredSameCount) ?? getSameAxisMinTarget(signature, axis, squadCap) ?? 0,
+    ),
+  );
+  if (axisTarget <= 0) return 0;
+
+  const currentList = Array.isArray(currentSquad) ? currentSquad : [];
+  const outsideSlots = Math.max(0, squadCap - axisTarget);
+  let score = 0;
+  let matchedAnyQuota = false;
+
+  for (const rule of ruleList) {
+    if (!rule || !PREFILL_PREFERENCE_TYPES.has(rule.type)) continue;
+    if (rule.op !== "min" && rule.op !== "exact") continue;
+    const required = getRuleCount(rule, squadCap);
+    if (required == null || required <= 0) continue;
+    const predicate = rule.predicate || buildPredicate(rule);
+    if (typeof predicate !== "function") continue;
+
+    matchedAnyQuota = true;
+    const currentSatisfied = countMatching(currentList, predicate);
+    const remainingRequired = Math.max(0, required - currentSatisfied);
+    const withinGroup = countMatching(groupPlayers, predicate);
+    const minNeededFromGroup = Math.max(0, remainingRequired - outsideSlots);
+    const coveredByGroup = Math.min(withinGroup, remainingRequired);
+    const weight = getGroupRuleFitWeight(rule);
+
+    if (remainingRequired <= 0) {
+      score += Math.max(6, weight);
+      continue;
+    }
+
+    if (withinGroup < minNeededFromGroup) {
+      score -= (minNeededFromGroup - withinGroup) * weight * 14;
+      continue;
+    }
+
+    score += minNeededFromGroup * weight * 5;
+    score += coveredByGroup * weight;
+    score += Math.max(0, withinGroup - minNeededFromGroup) * Math.max(3, Math.floor(weight / 5));
+  }
+
+  const ratingTarget = toNumber(signature?.ratingTarget);
+  if (ratingTarget != null && ratingTarget > 0) {
+    const topRatings = groupPlayers
+      .map((player) => toNumber(player?.rating) ?? 0)
+      .sort((a, b) => b - a)
+      .slice(0, Math.min(groupPlayers.length, Math.max(1, axisTarget)));
+    if (topRatings.length) {
+      score += computeAverage(topRatings) * (matchedAnyQuota ? 3 : 2);
+    }
+  }
+
+  return score;
+};
+
+const shouldBroadenSeedExploration = (signature, axis) => {
+  const axisAttr = AXIS_TO_ATTR[axis] ?? null;
+  if (!axisAttr) return false;
+  const target = getSameAxisMinTarget(signature, axis);
+  if (target == null || target <= 0) return false;
+  for (const attr of ["nationId", "leagueId", "teamId"]) {
+    if (attr === axisAttr) continue;
+    const distinctLimit = getUniqueCountLimitForAttr(signature, attr);
+    if (distinctLimit != null && distinctLimit > 0 && Number.isFinite(distinctLimit)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 const selectGroupForSameCount = (players, attr, required, options = {}) => {
   const groups = new Map();
   for (const player of players) {
@@ -997,20 +1262,42 @@ const selectGroupForSameCount = (players, attr, required, options = {}) => {
     if (!groups.has(value)) groups.set(value, []);
     groups.get(value).push(player);
   }
+  const axis =
+    Object.entries(AXIS_TO_ATTR).find(([, axisAttr]) => axisAttr === attr)?.[0] ??
+    null;
   let bestGroup = null;
+  let bestFitScore = -Infinity;
   let bestCount = 0;
-  let bestAvg = Infinity;
+  let bestAvg = -Infinity;
   for (const [group, list] of groups.entries()) {
     if (required != null && list.length < required) continue;
     const avg = computeAverage(list.map((player) => player.rating));
     const biasBoost = getPrefillBiasBoost(options?.prefillBias, attr, group);
-    const effectiveCount = list.length + biasBoost;
+    const fitScore =
+      biasBoost +
+      scoreGroupCompositionFit(
+        list,
+        axis,
+        options?.signature ?? null,
+        options?.squadSize ?? null,
+      ) +
+      scoreGroupRuleFit(
+        list,
+        options?.rules ?? null,
+        options?.signature ?? null,
+        axis,
+        options?.squadSize ?? null,
+        options?.currentSquad ?? [],
+        required,
+      );
     if (
-      effectiveCount > bestCount ||
-      (effectiveCount === bestCount && avg < bestAvg)
+      fitScore > bestFitScore ||
+      (fitScore === bestFitScore && list.length > bestCount) ||
+      (fitScore === bestFitScore && list.length === bestCount && avg > bestAvg)
     ) {
       bestGroup = group;
-      bestCount = effectiveCount;
+      bestFitScore = fitScore;
+      bestCount = list.length;
       bestAvg = avg;
     }
   }
@@ -1076,7 +1363,8 @@ const prefillPlayers = (
       : null;
   if (remainingCapacity != null && remainingCapacity <= 0) return false;
   const current = countMatching(squad, predicate);
-  let needed = required - current;
+  const targetNeeded = Math.max(0, required - current);
+  let needed = targetNeeded;
   if (needed <= 0) return true;
   if (remainingCapacity != null) {
     needed = Math.min(needed, remainingCapacity);
@@ -1280,7 +1568,8 @@ const prefillPlayers = (
     }
   }
 
-  return needed <= 0;
+  const finalCount = countMatching(squad, predicate);
+  return finalCount >= required;
 };
 
 const rebuildLockedIdsFromSquad = (squad, lockedIds) => {
@@ -5193,6 +5482,12 @@ const buildChallengeSignature = (rules, squadSize) => {
     totalChemistryTarget: chemistryTargets?.total ?? null,
     minPlayerChemistryTarget: chemistryTargets?.minEach ?? null,
     ratingTarget: ratingRequirement?.target ?? null,
+    nationCountMin: null,
+    nationCountMax: null,
+    leagueCountMin: null,
+    leagueCountMax: null,
+    clubCountMin: null,
+    clubCountMax: null,
     hasSameLeagueMin: false,
     hasSameNationMin: false,
     hasSameClubMin: false,
@@ -5217,6 +5512,48 @@ const buildChallengeSignature = (rules, squadSize) => {
   for (const rule of list) {
     if (!rule) continue;
     const required = getRuleCount(rule, squadSize);
+    if (rule.type === "nation_count") {
+      if (rule.op === "min" || rule.op === "exact") {
+        if (required != null) {
+          signature.nationCountMin = Math.max(signature.nationCountMin ?? 0, required);
+        }
+      }
+      if ((rule.op === "max" || rule.op === "exact") && required != null) {
+        signature.nationCountMax =
+          signature.nationCountMax == null
+            ? required
+            : Math.min(signature.nationCountMax, required);
+      }
+      continue;
+    }
+    if (rule.type === "league_count") {
+      if (rule.op === "min" || rule.op === "exact") {
+        if (required != null) {
+          signature.leagueCountMin = Math.max(signature.leagueCountMin ?? 0, required);
+        }
+      }
+      if ((rule.op === "max" || rule.op === "exact") && required != null) {
+        signature.leagueCountMax =
+          signature.leagueCountMax == null
+            ? required
+            : Math.min(signature.leagueCountMax, required);
+      }
+      continue;
+    }
+    if (rule.type === "club_count") {
+      if (rule.op === "min" || rule.op === "exact") {
+        if (required != null) {
+          signature.clubCountMin = Math.max(signature.clubCountMin ?? 0, required);
+        }
+      }
+      if ((rule.op === "max" || rule.op === "exact") && required != null) {
+        signature.clubCountMax =
+          signature.clubCountMax == null
+            ? required
+            : Math.min(signature.clubCountMax, required);
+      }
+      continue;
+    }
     if (rule.type === "same_league_count") {
       if (rule.op === "min" || rule.op === "exact") {
         signature.hasSameLeagueMin = true;
@@ -5333,6 +5670,12 @@ const buildChallengeSignature = (rules, squadSize) => {
       signature.minPlayerChemistryTarget,
     ],
     ratingTarget: signature.ratingTarget,
+    nationCountMin: signature.nationCountMin,
+    nationCountMax: signature.nationCountMax,
+    leagueCountMin: signature.leagueCountMin,
+    leagueCountMax: signature.leagueCountMax,
+    clubCountMin: signature.clubCountMin,
+    clubCountMax: signature.clubCountMax,
     sameLeagueMin: signature.sameLeagueMin,
     sameNationMin: signature.sameNationMin,
     sameClubMin: signature.sameClubMin,
@@ -5460,6 +5803,7 @@ const scoreGroupSeed = (
   context,
   squadSize,
   mode = "default",
+  rules = null,
 ) => {
   const attr = AXIS_TO_ATTR[axis] ?? null;
   if (!attr || groupId == null) return null;
@@ -5486,6 +5830,21 @@ const scoreGroupSeed = (
   const clubs = buildCountsMap(groupPlayers, "teamId").size;
   const rareCount = groupPlayers.filter((player) => isRareNonSpecialPlayer(player)).length;
   const avgRating = computeAverage(groupPlayers.map((player) => player?.rating));
+  const compositionFitScore = scoreGroupCompositionFit(
+    groupPlayers,
+    axis,
+    signature,
+    squadSize,
+  );
+  const ruleFitScore = scoreGroupRuleFit(
+    groupPlayers,
+    rules,
+    signature,
+    axis,
+    squadSize,
+    [],
+    getSameAxisMinTarget(signature, axis, squadSize),
+  );
   const requiredMatch =
     axis === "league"
       ? signature?.requiredLeagueIds?.includes?.(toNumber(groupId)) ?? false
@@ -5497,6 +5856,8 @@ const scoreGroupSeed = (
     positions.size * 7 +
     rareCount * 2 +
     clubs * (axis === "club" ? 0 : 2) +
+    compositionFitScore +
+    ruleFitScore +
     (requiredMatch ? 30 : 0) -
     avgRating;
   const chemistryTarget = toNumber(signature?.totalChemistryTarget) ?? 0;
@@ -5509,6 +5870,8 @@ const scoreGroupSeed = (
     avgRating * 4 +
     chemistryTarget * 2 +
     ratingTarget * 3 +
+    compositionFitScore * 1.5 +
+    ruleFitScore * 1.25 +
     (requiredMatch ? 30 : 0);
   const cappedCount = Math.min(groupPlayers.length, Math.max(6, toNumber(squadSize) ?? 11));
   const ratingHeavyScore =
@@ -5519,6 +5882,8 @@ const scoreGroupSeed = (
     avgRating * 25 +
     chemistryTarget * 2 +
     ratingTarget * 4 +
+    compositionFitScore +
+    ruleFitScore +
     (requiredMatch ? 30 : 0);
   const score =
     mode === "chemistry_rating"
@@ -5529,11 +5894,19 @@ const scoreGroupSeed = (
   return { axis, groupId, score };
 };
 
-const generateBaselineSeeds = (signature, players, squadSize, context) => {
+const generateBaselineSeeds = (signature, players, squadSize, context, rules = null) => {
   const baselineSeed = createSeedDescriptor({
     type: "baseline",
     label: "Baseline",
   });
+  const broadenLeagueExploration = shouldBroadenSeedExploration(
+    signature,
+    "league",
+  );
+  const broadenNationExploration = shouldBroadenSeedExploration(
+    signature,
+    "nation",
+  );
   const hasUsefulSeedSignals = Boolean(
     (signature?.requiredLeagueIds || []).length ||
       (signature?.requiredNationIds || []).length ||
@@ -5604,10 +5977,25 @@ const generateBaselineSeeds = (signature, players, squadSize, context) => {
     chemistryExplorationWanted
   ) {
     const defaultLeagueSeedCount =
-      chemistryExplorationWanted || ratingExplorationWanted ? 1 : 2;
+      chemistryExplorationWanted || ratingExplorationWanted
+        ? broadenLeagueExploration
+          ? 3
+          : 1
+        : broadenLeagueExploration
+          ? 3
+          : 2;
     const leagues = Array.from(buildCountsMap(players, "leagueId").keys())
       .map((groupId) =>
-        scoreGroupSeed(players, "league", groupId, signature, context, squadSize),
+        scoreGroupSeed(
+          players,
+          "league",
+          groupId,
+          signature,
+          context,
+          squadSize,
+          "default",
+          rules,
+        ),
       )
       .filter(Boolean)
       .sort((a, b) => b.score - a.score)
@@ -5634,11 +6022,12 @@ const generateBaselineSeeds = (signature, players, squadSize, context) => {
             context,
             squadSize,
             "chemistry_rating",
+            rules,
           ),
         )
         .filter(Boolean)
         .sort((a, b) => b.score - a.score)
-        .slice(0, 1);
+        .slice(0, broadenLeagueExploration ? 2 : 1);
       for (const entry of chemistryLeague) {
         exploratorySeeds.push(
           createSeedDescriptor({
@@ -5662,6 +6051,7 @@ const generateBaselineSeeds = (signature, players, squadSize, context) => {
             context,
             squadSize,
             "rating_heavy",
+            rules,
           ),
         )
         .filter(Boolean)
@@ -5687,10 +6077,25 @@ const generateBaselineSeeds = (signature, players, squadSize, context) => {
     chemistryExplorationWanted
   ) {
     const defaultNationSeedCount =
-      chemistryExplorationWanted || ratingExplorationWanted ? 1 : 2;
+      chemistryExplorationWanted || ratingExplorationWanted
+        ? broadenNationExploration
+          ? 3
+          : 1
+        : broadenNationExploration
+          ? 3
+          : 2;
     const nations = Array.from(buildCountsMap(players, "nationId").keys())
       .map((groupId) =>
-        scoreGroupSeed(players, "nation", groupId, signature, context, squadSize),
+        scoreGroupSeed(
+          players,
+          "nation",
+          groupId,
+          signature,
+          context,
+          squadSize,
+          "default",
+          rules,
+        ),
       )
       .filter(Boolean)
       .sort((a, b) => b.score - a.score)
@@ -5717,11 +6122,12 @@ const generateBaselineSeeds = (signature, players, squadSize, context) => {
             context,
             squadSize,
             "chemistry_rating",
+            rules,
           ),
         )
         .filter(Boolean)
         .sort((a, b) => b.score - a.score)
-        .slice(0, 1);
+        .slice(0, broadenNationExploration ? 2 : 1);
       for (const entry of chemistryNation) {
         exploratorySeeds.push(
           createSeedDescriptor({
@@ -5745,6 +6151,7 @@ const generateBaselineSeeds = (signature, players, squadSize, context) => {
             context,
             squadSize,
             "rating_heavy",
+            rules,
           ),
         )
         .filter(Boolean)
@@ -5765,7 +6172,11 @@ const generateBaselineSeeds = (signature, players, squadSize, context) => {
   }
   return dedupeSeeds([baselineSeed, ...requiredSeeds, ...exploratorySeeds]).slice(
     0,
-    chemistryExplorationWanted || ratingExplorationWanted ? 8 : 4,
+    chemistryExplorationWanted || ratingExplorationWanted
+      ? broadenLeagueExploration || broadenNationExploration
+        ? 10
+        : 8
+      : 4,
   );
 };
 
@@ -6492,6 +6903,10 @@ const runPipeline = (inputContext, seed = null, phaseConfig = null) => {
             : "teamId";
       const group = selectGroupForSameCount(pool, attr, required, {
         prefillBias: contextSeed?.prefillBias ?? null,
+        signature,
+        squadSize,
+        rules,
+        currentSquad: squad,
       });
       if (group == null) {
         ignoredRequirements.push(rule.raw);
@@ -6577,6 +6992,10 @@ const runPipeline = (inputContext, seed = null, phaseConfig = null) => {
               : "teamId";
         const group = selectGroupForSameCount(pool, attr, required, {
           prefillBias: contextSeed?.prefillBias ?? null,
+          signature,
+          squadSize,
+          rules,
+          currentSquad: squad,
         });
         if (group == null) {
           ignoredRequirements.push(rule.raw);
@@ -7754,6 +8173,7 @@ export const solveSquad = (context) => {
     normalizedPlayers,
     squadSize,
     baseContext,
+    rules,
   ).filter(
     (seed) =>
       !(

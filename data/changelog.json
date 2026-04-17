@@ -2,6 +2,17 @@
   "version": 1,
   "releases": [
     {
+      "version": "1.9",
+      "date": "2026-04-18",
+      "headline": "Solver and player pool fixes",
+      "summary": "Improved solver logic and fixed the SBC Storage and Use Unassigned settings.",
+      "details": [
+        "Improved solver logic so it handles SBCs more reliably.",
+        "Fixed Only Storage so it properly uses players that match your SBC storage.",
+        "Fixed Use Unassigned so unassigned players can be fetched, solved with, and applied correctly."
+      ]
+    },
+    {
       "version": "1.8",
       "date": "2026-04-01",
       "headline": "More reliable solving and smarter fetching",
