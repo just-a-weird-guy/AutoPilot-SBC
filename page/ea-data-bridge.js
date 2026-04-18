@@ -4092,6 +4092,16 @@
     }
     if (text.includes("player quality")) return "player_quality";
     if (text.includes("player level")) return "player_level";
+    if (text.includes("tots") || text.includes("team of the season")) {
+      if (
+        text.includes("totw") ||
+        text.includes("team of the week") ||
+        text.includes("inform")
+      ) {
+        return "player_totw_or_tots";
+      }
+      return "player_tots";
+    }
     if (text.includes("rare")) return "player_rarity";
     if (
       text.includes("totw") ||
@@ -4435,14 +4445,31 @@
         const keyName = getEligibilityKeyName(keyNumber);
         const keyNameNormalized =
           normalizeKeyName(keyName) ?? `key_${keyNumber}`;
+        const normalizedValue = normalizeKvValue(value);
         const labelType = deriveTypeFromLabel(label);
+        const numericValues =
+          typeof normalizedValue === "number"
+            ? [normalizedValue]
+            : Array.isArray(normalizedValue)
+              ? normalizedValue.filter((item) => typeof item === "number")
+              : [];
+        const specialRarityOverride =
+          keyNameNormalized === "player_rarity_group" &&
+          (labelType === "player_totw_or_tots" ||
+            labelType === "player_tots" ||
+            numericValues.includes(44))
+            ? labelType === "player_tots"
+              ? "player_tots"
+              : "player_totw_or_tots"
+            : null;
         const type =
           keyNumber === -1
             ? "players_in_squad"
-            : keyNameNormalized.startsWith("key_") && labelType
-              ? labelType
-              : keyNameNormalized;
-        const normalizedValue = normalizeKvValue(value);
+            : specialRarityOverride
+              ? specialRarityOverride
+              : keyNameNormalized.startsWith("key_") && labelType
+                ? labelType
+                : keyNameNormalized;
         const derivedCount = (() => {
           if (count !== -1) return null;
           if (!DERIVED_COUNT_ALLOWED_TYPES.has(type)) return null;
@@ -6409,6 +6436,10 @@
         </div>
       </div>
       <div class="ea-data-app-settings-actions">
+        <a href="https://github.com/just-a-weird-guy/AutoPilot-SBC" target="_blank" rel="noopener noreferrer" class="ea-data-app-settings-btn ea-data-app-settings-btn--github" title="View source code on GitHub">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          Source Code
+        </a>
         <button type="button" class="ea-data-app-settings-btn ea-data-app-settings-btn--info" data-action="open-whats-new">Changelog</button>
         <button type="button" class="ea-data-app-settings-btn ea-data-app-settings-btn--reset" data-action="reset-global">Reset Global</button>
         <button type="button" class="ea-data-app-settings-btn" data-action="save-global">Save Global</button>
@@ -19928,7 +19959,7 @@
       path: SETTINGS_PATHS.SOLVER_EXCLUDE_SPECIAL,
       idSuffix: "exclude-special",
       label: "Exclude Special",
-      help: "Avoid using special cards except TOTW/inform items. TOTW is controlled separately.",
+      help: "Avoid using special cards except TOTW, TOTS, and inform items. Those are controlled separately.",
       scopes: Object.freeze(["challenge", "global", "multi", "set"]),
       legacyKeys: Object.freeze([]),
     }),
@@ -19936,8 +19967,8 @@
       key: "useTotwPlayers",
       path: SETTINGS_PATHS.SOLVER_USE_TOTW_PLAYERS,
       idSuffix: "use-totw-players",
-      label: "Use TOTW Players",
-      help: "Allow Team of the Week / inform cards in solver pools and rating optimization.",
+      label: "Use TOTW/TOTS Players",
+      help: "Allow Team of the Week, Team of the Season, and inform cards in solver pools and rating optimization.",
       scopes: Object.freeze(["challenge", "global", "multi", "set"]),
       legacyKeys: Object.freeze([]),
     }),
@@ -21638,6 +21669,19 @@
     return readNumeric(player?.rarityId) === 3;
   };
 
+  const isTotsPlayer = (player) => {
+    if (!player || typeof player !== "object") return false;
+    const rarityName = String(player?.rarityName ?? "")
+      .trim()
+      .toLowerCase();
+    return (
+      rarityName.includes("team of the season") || rarityName.includes("tots")
+    );
+  };
+
+  const isTotwOrTotsPlayer = (player) =>
+    isTotwPlayer(player) || isTotsPlayer(player);
+
   const filterPlayersBySolverPoolSettings = (
     players,
     settings,
@@ -21709,14 +21753,15 @@
       if (id != null && required.has(String(id))) return true;
       // Intentional precedence: evo hard-block runs before unassigned bypass.
       if (!useEvolutionPlayers && isEvolutionPlayer(player)) return false;
-      const isTotw = isTotwPlayer(player);
-      if (!useTotwPlayers && isTotw) return false;
+      const isTotwOrTots = isTotwOrTotsPlayer(player);
+      if (!useTotwPlayers && isTotwOrTots) return false;
       if (useUnassigned && (player?.isDuplicate || player?.isUnassigned)) {
         return true;
       }
       if (onlyStorage && !isOnlyStorageEligible(player)) return false;
       if (excludeTradable && Boolean(player?.isTradeable)) return false;
-      if (excludeSpecial && Boolean(player?.isSpecial) && !isTotw) return false;
+      if (excludeSpecial && Boolean(player?.isSpecial) && !isTotwOrTots)
+        return false;
       const rating = readNumeric(player?.rating);
       return rating != null && rating >= ratingMin && rating <= ratingMax;
     });

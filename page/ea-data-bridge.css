@@ -1878,6 +1878,19 @@
   background: #a62828 !important;
   border-color: #a62828 !important;
 }
+.ea-data-app-settings-btn[data-action="save-global"] {
+  background: #1a8a4a !important;
+  border-color: #1a8a4a !important;
+  color: #fff !important;
+}
+.ea-data-app-settings-btn[data-action="save-global"]:hover {
+  background: #157a3e !important;
+  border-color: #157a3e !important;
+}
+.ea-data-app-settings-btn[data-action="save-global"]:active {
+  background: #126b36 !important;
+  border-color: #126b36 !important;
+}
 .ea-data-app-settings-btn--reset {
   background: rgba(213, 59, 59, 0.16) !important;
   border-color: rgba(213, 59, 59, 0.85) !important;
@@ -1898,6 +1911,33 @@
 .ea-data-app-settings-btn--info:active {
   background: rgba(154, 96, 12, 0.3) !important;
   border-color: rgba(255, 190, 60, 0.92) !important;
+}
+.ea-data-app-settings-btn--github {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  text-decoration: none;
+  background: #1a1a1a;
+  border-color: rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.92);
+  transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+.ea-data-app-settings-btn--github svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+  transition: opacity 180ms ease;
+}
+.ea-data-app-settings-btn--github:hover {
+  background: #2a2a2a;
+  border-color: rgba(255, 255, 255, 0.32);
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.08);
+}
+.ea-data-app-settings-btn--github:hover svg {
+  opacity: 1;
+}
+.ea-data-app-settings-btn--github:active {
+  transform: translateY(1px);
 }
 .ea-data-app-settings-group .ea-data-range {
   width: 100%;

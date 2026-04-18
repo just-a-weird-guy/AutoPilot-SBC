@@ -15,6 +15,8 @@ const REQUIREMENT_KEYS = [
   "player_quality",
   "player_rarity",
   "player_rarity_group",
+  "player_tots",
+  "player_totw_or_tots",
   "player_rarity_or_totw",
   "nation_id",
   "league_id",
@@ -55,6 +57,8 @@ const TYPE_ALIASES = {
   player_quality: "player_quality",
   player_rarity: "player_rarity",
   player_rarity_group: "player_rarity_group",
+  player_tots: "player_tots",
+  player_totw_or_tots: "player_totw_or_tots",
   player_rarity_or_totw: "player_rarity_or_totw",
   nation_id: "nation_id",
   league_id: "league_id",
@@ -121,6 +125,8 @@ const FILTER_PRIORITY = [
   "player_level",
   "player_quality",
   "player_inform",
+  "player_tots",
+  "player_totw_or_tots",
   "player_rarity",
   "player_rarity_group",
   "player_rarity_or_totw",
@@ -172,6 +178,15 @@ const isTotwPlayer = (player) => {
   return toNumber(player?.rarityId) === 3;
 };
 
+const isTotsPlayer = (player) => {
+  const rarity = normalizeString(player?.rarityName);
+  if (!rarity) return false;
+  return rarity.includes("team of the season") || rarity.includes("tots");
+};
+
+const isTotwOrTotsPlayer = (player) =>
+  isTotwPlayer(player) || isTotsPlayer(player);
+
 const extractValues = (value) => {
   if (value == null) return [];
   if (Array.isArray(value)) return value.flatMap(extractValues);
@@ -194,6 +209,24 @@ const normalizeRequirementType = (rule) => {
   if (!rule) return null;
   const rawType = normalizeString(rule.type);
   const keyName = normalizeString(rule.keyNameNormalized || rule.keyName);
+  const label = normalizeString(rule.label || rule?.raw?.label);
+  const numericValues = extractValues(rule.value ?? rule.values)
+    .map(toNumber)
+    .filter((value) => value != null);
+  const isRarityGroup =
+    rawType === "player_rarity_group" || keyName === "player_rarity_group";
+  if (isRarityGroup) {
+    const hasTots =
+      Boolean(label?.includes("tots")) ||
+      Boolean(label?.includes("team of the season"));
+    const hasTotw =
+      Boolean(label?.includes("totw")) ||
+      Boolean(label?.includes("team of the week")) ||
+      Boolean(label?.includes("inform"));
+    if (hasTots && hasTotw) return "player_totw_or_tots";
+    if (hasTots) return "player_tots";
+    if (numericValues.includes(44)) return "player_totw_or_tots";
+  }
   const enumType =
     ENUM_TO_TYPE[rule.keyName] || ENUM_TO_TYPE[rule.keyNameNormalized];
   const type =
@@ -203,7 +236,6 @@ const normalizeRequirementType = (rule) => {
     rawType ||
     keyName;
   if (type) return type;
-  const label = normalizeString(rule.label);
   if (!label) return null;
   if (label.includes("players in the squad")) return "players_in_squad";
   if (label.includes("team rating")) return "team_rating";
@@ -333,6 +365,10 @@ const normalizePlayers = (players) => {
       rarityName,
       rarityId: item?.rarityId ?? null,
     });
+    const isTots = isTotsPlayer({
+      rarityName,
+      rarityId: item?.rarityId ?? null,
+    });
     const isEvolution =
       typeof item.isEvolution === "function"
         ? Boolean(item.isEvolution())
@@ -350,6 +386,8 @@ const normalizePlayers = (players) => {
       isDuplicate: Boolean(item.isDuplicate),
       isSpecial,
       isTotw,
+      isTots,
+      isTotwOrTots: isTotw || isTots,
       isEvolution,
     });
   }
@@ -496,7 +534,7 @@ export const buildSolverContext = ({
   }
   if (!normalizedFilters.useTotwPlayers) {
     normalizedPlayers = normalizedPlayers.filter((player) => {
-      if (!player?.isTotw) return true;
+      if (!player?.isTotwOrTots) return true;
       if (player?.id == null) return false;
       return lockedSlotPlayerIds.has(String(player.id));
     });
@@ -504,7 +542,7 @@ export const buildSolverContext = ({
   if (normalizedFilters.excludeSpecial) {
     normalizedPlayers = normalizedPlayers.filter((player) => {
       if (isUnassignedBypass(player)) return true;
-      if (!player?.isSpecial || player?.isTotw) return true;
+      if (!player?.isSpecial || player?.isTotwOrTots) return true;
       if (player?.id == null) return false;
       return lockedSlotPlayerIds.has(String(player.id));
     });
@@ -633,6 +671,8 @@ const FULL_SQUAD_EXACT_TYPES = new Set([
   "player_quality",
   "player_rarity",
   "player_rarity_group",
+  "player_tots",
+  "player_totw_or_tots",
   "player_tradability",
   "player_inform",
 ]);
@@ -831,6 +871,12 @@ const buildPredicate = (rule) => {
     const normalized = values.map(normalizeQualityValue).filter(Boolean);
     if (!normalized.length) return null;
     return (player) => normalized.includes(player.quality);
+  }
+  if (type === "player_totw_or_tots") {
+    return (player) => isTotwOrTotsPlayer(player);
+  }
+  if (type === "player_tots") {
+    return (player) => isTotsPlayer(player);
   }
   if (
     type === "player_rarity" ||
@@ -1151,6 +1197,8 @@ const getGroupRuleFitWeight = (rule) => {
       return 34;
     case "player_rarity":
     case "player_rarity_group":
+    case "player_tots":
+    case "player_totw_or_tots":
     case "player_rarity_or_totw":
       return 32;
     case "player_inform":
@@ -1312,6 +1360,8 @@ const PREFILL_PREFERENCE_TYPES = new Set([
   "player_quality",
   "player_rarity",
   "player_rarity_group",
+  "player_tots",
+  "player_totw_or_tots",
   "player_tradability",
   "first_owner_players_count",
   "player_exact_ovr",
@@ -4505,6 +4555,8 @@ const evaluateRule = (rule, squad, squadSize, evalCtx) => {
     rule.type === "player_quality" ||
     rule.type === "player_rarity" ||
     rule.type === "player_rarity_group" ||
+    rule.type === "player_tots" ||
+    rule.type === "player_totw_or_tots" ||
     rule.type === "player_rarity_or_totw" ||
     rule.type === "player_tradability" ||
     rule.type === "first_owner_players_count" ||
@@ -5631,7 +5683,11 @@ const buildChallengeSignature = (rules, squadSize) => {
       }
       continue;
     }
-    if (rule.type === "player_inform") {
+    if (
+      rule.type === "player_inform" ||
+      rule.type === "player_totw_or_tots" ||
+      rule.type === "player_tots"
+    ) {
       signature.hasInformRequirement = true;
     }
   }
@@ -7286,6 +7342,8 @@ const runPipeline = (inputContext, seed = null, phaseConfig = null) => {
       "players_in_squad",
       "team_rating",
       "player_inform",
+      "player_tots",
+      "player_totw_or_tots",
       "player_quality",
       "player_level",
       "player_rarity",

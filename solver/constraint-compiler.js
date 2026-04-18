@@ -6,6 +6,8 @@ export const REQUIREMENT_KEYS = [
   "player_quality",
   "player_rarity",
   "player_rarity_group",
+  "player_tots",
+  "player_totw_or_tots",
   "player_rarity_or_totw",
   "nation_id",
   "league_id",
@@ -46,6 +48,8 @@ const TYPE_ALIASES = {
   player_quality: "player_quality",
   player_rarity: "player_rarity",
   player_rarity_group: "player_rarity_group",
+  player_tots: "player_tots",
+  player_totw_or_tots: "player_totw_or_tots",
   player_rarity_or_totw: "player_rarity_or_totw",
   nation_id: "nation_id",
   league_id: "league_id",
@@ -109,6 +113,8 @@ const CATEGORY_BY_TYPE = {
   player_quality: "player_tier_or_quality",
   player_rarity: "special_or_rarity",
   player_rarity_group: "special_or_rarity",
+  player_tots: "special_or_rarity",
+  player_totw_or_tots: "special_or_rarity",
   player_rarity_or_totw: "special_or_rarity",
   player_inform: "special_or_rarity",
   legend_count: "special_or_rarity",
@@ -137,6 +143,8 @@ const FULL_SQUAD_EXACT_TYPES = new Set([
   "player_quality",
   "player_rarity",
   "player_rarity_group",
+  "player_tots",
+  "player_totw_or_tots",
   "player_tradability",
   "player_inform",
 ]);
@@ -217,6 +225,24 @@ export const normalizeRequirementType = (rule) => {
   if (!rule) return null;
   const rawType = normalizeString(rule.type);
   const keyName = normalizeString(rule.keyNameNormalized || rule.keyName);
+  const label = normalizeString(rule.label || rule?.raw?.label);
+  const numericValues = extractValues(rule.value ?? rule.values)
+    .map(toNumber)
+    .filter((value) => value != null);
+  const isRarityGroup =
+    rawType === "player_rarity_group" || keyName === "player_rarity_group";
+  if (isRarityGroup) {
+    const hasTots =
+      Boolean(label?.includes("tots")) ||
+      Boolean(label?.includes("team of the season"));
+    const hasTotw =
+      Boolean(label?.includes("totw")) ||
+      Boolean(label?.includes("team of the week")) ||
+      Boolean(label?.includes("inform"));
+    if (hasTots && hasTotw) return "player_totw_or_tots";
+    if (hasTots) return "player_tots";
+    if (numericValues.includes(44)) return "player_totw_or_tots";
+  }
   const enumType = ENUM_TO_TYPE[rule.keyName] || ENUM_TO_TYPE[rule.keyNameNormalized];
   const type =
     enumType ||
@@ -226,7 +252,6 @@ export const normalizeRequirementType = (rule) => {
     keyName;
   if (type) return type;
 
-  const label = normalizeString(rule.label);
   if (!label) return null;
   if (label.includes("players in the squad")) return "players_in_squad";
   if (label.includes("team rating")) return "team_rating";
