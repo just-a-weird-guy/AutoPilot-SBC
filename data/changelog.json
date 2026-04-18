@@ -9,7 +9,8 @@
       "details": [
         "Improved solver logic so it handles SBCs more reliably.",
         "Fixed Only Storage so it properly uses players that match your SBC storage.",
-        "Fixed Use Unassigned so unassigned players can be fetched, solved with, and applied correctly."
+        "Fixed Use Unassigned so unassigned players can be fetched, solved with, and applied correctly.",
+        "WE ARE OFFICIALLY OPEN SOURCE!!!  https://github.com/just-a-weird-guy/AutoPilot-SBC"
       ]
     },
     {
