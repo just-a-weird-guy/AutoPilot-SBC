@@ -2,13 +2,13 @@
   "version": 1,
   "releases": [
     {
-      "version": "1.9.1",
-      "date": "2026-04-19",
-      "headline": "TOTS solver fix",
-      "summary": "Improved solver logic to recognise TOTS requirements and club players.",
+      "version": "1.9.2",
+      "date": "2026-04-25",
+      "headline": "Improved fetching speeds.",
+      "summary": "Made player fetching much more efficient and take less time.",
       "details": [
-        "Improved solver logic to recognise TOTS requirements and club players.",
-        "Added a button to quickly view the extensions source code in the global settings menu."
+        "Made player fetching much more efficient and take less time.",
+        "Minor imrpovement to solver logic to fix a small regression."
       ]
     },
     {
