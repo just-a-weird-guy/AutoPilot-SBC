@@ -1655,16 +1655,105 @@ const applyMinMaxFilters = (pool, rules) => {
 const prefersNonSpecial = (player) =>
   !player?.isSpecial && !player?.isEvolution;
 
-const preferNonSpecialPlayers = (pool, squad, squadSize, lockedIds) => {
+const prefersNonTotwOrTots = (player) => !player?.isTotwOrTots;
+
+const canPreferredPoolStillSolveRating = (
+  preferredPool,
+  squad,
+  squadSize,
+  targetRating,
+  rules,
+) => {
+  const target = toNumber(targetRating);
+  if (target == null) return true;
+  const working = Array.isArray(squad) ? squad.slice(0, squadSize) : [];
+  const need = Math.max(0, (toNumber(squadSize) ?? 0) - working.length);
+  if (need <= 0) {
+    return (
+      isSquadValidIgnoringTeamRating(rules, working, squadSize) &&
+      getSquadRating(working) >= target
+    );
+  }
+  const usedIds = new Set(
+    working.map((player) => player?.id).filter((id) => id != null),
+  );
+  const candidates = (preferredPool || [])
+    .filter((player) => player && player.id != null)
+    .filter((player) => !usedIds.has(player.id))
+    .slice()
+    .sort((a, b) => (toNumber(b?.rating) ?? 0) - (toNumber(a?.rating) ?? 0));
+  if (candidates.length < need) return false;
+  working.push(...candidates.slice(0, need));
+  return (
+    working.length >= (toNumber(squadSize) ?? 0) &&
+    isSquadValidIgnoringTeamRating(rules, working, squadSize) &&
+    getSquadRating(working) >= target
+  );
+};
+
+const preferNonSpecialPlayers = (
+  pool,
+  squad,
+  squadSize,
+  lockedIds,
+  options = {},
+) => {
   const preferred = (pool || [])
     .filter((player) => !lockedIds.has(player.id))
     .filter(prefersNonSpecial)
     .sort((a, b) => a.rating - b.rating);
-  if (preferred.length >= squadSize - squad.length) {
+  if (
+    preferred.length >= squadSize - squad.length &&
+    canPreferredPoolStillSolveRating(
+      preferred,
+      squad,
+      squadSize,
+      options?.ratingTarget ?? null,
+      options?.rules ?? [],
+    )
+  ) {
     return { pool: preferred, applied: true };
   }
   return { pool, applied: false };
 };
+
+const preferNonTotwOrTotsPlayers = (
+  pool,
+  squad,
+  squadSize,
+  lockedIds,
+  options = {},
+) => {
+  const preferred = (pool || [])
+    .filter((player) => !lockedIds.has(player.id))
+    .filter(prefersNonTotwOrTots)
+    .sort((a, b) => a.rating - b.rating);
+  if (
+    preferred.length >= squadSize - squad.length &&
+    canPreferredPoolStillSolveRating(
+      preferred,
+      squad,
+      squadSize,
+      options?.ratingTarget ?? null,
+      options?.rules ?? [],
+    )
+  ) {
+    return { pool: preferred, applied: true };
+  }
+  return { pool, applied: false };
+};
+
+const hasExplicitTotwOrTotsRequirement = (rules = []) =>
+  (rules || []).some((rule) => {
+    if (!rule) return false;
+    const count = Math.max(0, toNumber(rule?.count) ?? 0);
+    if (count <= 0) return false;
+    return (
+      rule.type === "player_inform" ||
+      rule.type === "player_tots" ||
+      rule.type === "player_totw_or_tots"
+    );
+  });
 
 const fillSquad = (squad, pool, squadSize, lockedIds, options = {}) => {
   const target = toNumber(squadSize) ?? 0;
@@ -1828,6 +1917,63 @@ const fillSquad = (squad, pool, squadSize, lockedIds, options = {}) => {
         if (cap.predicate(player)) cap.count += 1;
       }
     }
+  }
+
+  return working.slice(0, target);
+};
+
+const PURE_RATING_ONLY_RULE_TYPES = new Set([
+  "team_rating",
+  "players_in_squad",
+]);
+
+const isPureRatingOnlySbc = (rules = [], chemistryRequired = false) =>
+  !chemistryRequired &&
+  (rules || []).length > 0 &&
+  (rules || []).every(
+    (rule) => rule && PURE_RATING_ONLY_RULE_TYPES.has(rule.type),
+  );
+
+const buildPureRatingOnlySquad = (squad, pool, squadSize, lockedIds) => {
+  const working = Array.isArray(squad) ? squad.slice(0, squadSize) : [];
+  const target = Math.max(0, toNumber(squadSize) ?? 0);
+  if (working.length >= target) return working.slice(0, target);
+
+  const usedIds = new Set(
+    working.map((player) => player?.id).filter((id) => id != null),
+  );
+  const seenDefs = new Set(
+    working
+      .map((player) => getDefinitionKey(player))
+      .filter((value) => value != null)
+      .map(String),
+  );
+  const candidates = (pool || [])
+    .filter((player) => player && player.id != null)
+    .filter((player) => !usedIds.has(player.id))
+    .slice()
+    .sort((a, b) => {
+      const ra = toNumber(a?.rating) ?? 0;
+      const rb = toNumber(b?.rating) ?? 0;
+      if (ra !== rb) return rb - ra;
+      if (Boolean(a?.isTotwOrTots) !== Boolean(b?.isTotwOrTots)) {
+        return Number(Boolean(a?.isTotwOrTots)) - Number(Boolean(b?.isTotwOrTots));
+      }
+      if (Boolean(a?.isSpecial) !== Boolean(b?.isSpecial)) {
+        return Number(Boolean(a?.isSpecial)) - Number(Boolean(b?.isSpecial));
+      }
+      return (toNumber(a?.id) ?? 0) - (toNumber(b?.id) ?? 0);
+    });
+
+  for (const candidate of candidates) {
+    if (working.length >= target) break;
+    if (!candidate || candidate.id == null) continue;
+    if (lockedIds?.has(candidate.id)) continue;
+    const defKey = getDefinitionKey(candidate);
+    if (defKey != null && seenDefs.has(String(defKey))) continue;
+    working.push(candidate);
+    usedIds.add(candidate.id);
+    if (defKey != null) seenDefs.add(String(defKey));
   }
 
   return working.slice(0, target);
@@ -7178,12 +7324,19 @@ const runPipeline = (inputContext, seed = null, phaseConfig = null) => {
     context?.filters?.useTotwPlayers,
     true,
   );
-  const preferLowerExcessInformsDuringSolve = !useTotwPlayers;
+  const explicitTotwOrTotsRequirement =
+    hasExplicitTotwOrTotsRequirement(rules);
+  const preferLowerExcessInformsDuringSolve = !explicitTotwOrTotsRequirement;
   const allowsNonSpecialPreference =
     excludeSpecial &&
     (!specialRule ||
       specialRule.op === "max" ||
       toNumber(specialRule.count) === 0);
+  const allowsNonTotwOrTotsPreference =
+    useTotwPlayers &&
+    !explicitTotwOrTotsRequirement &&
+    Boolean(ratingRequirement) &&
+    !chemistryRequired;
 
   const minMax = applyMinMaxFilters(
     pool,
@@ -7208,6 +7361,10 @@ const runPipeline = (inputContext, seed = null, phaseConfig = null) => {
       squad,
       squadSize,
       lockedIds,
+      {
+        ratingTarget: ratingRequirement?.target ?? null,
+        rules,
+      },
     );
     if (preferResult.applied) {
       pool = preferResult.pool;
@@ -7220,31 +7377,64 @@ const runPipeline = (inputContext, seed = null, phaseConfig = null) => {
     }
   }
 
-  // Soft-discourage specials: at equal rating, non-specials come first in pool ordering.
-  // This passively makes fill/swap prefer non-specials without blocking specials.
-  pool.sort((a, b) => {
-    const seedBiasDiff =
-      getSeedPoolBiasScore(a, contextSeed) -
-      getSeedPoolBiasScore(b, contextSeed);
-    if (seedBiasDiff !== 0) return seedBiasDiff;
-    const ra = toNumber(a?.rating) ?? 0;
-    const rb = toNumber(b?.rating) ?? 0;
-    if (ra !== rb) return ra - rb;
-    return (a?.isSpecial ? 1 : 0) - (b?.isSpecial ? 1 : 0);
-  });
+  if (allowsNonTotwOrTotsPreference) {
+    const preferResult = preferNonTotwOrTotsPlayers(
+      pool,
+      squad,
+      squadSize,
+      lockedIds,
+      {
+        ratingTarget: ratingRequirement?.target ?? null,
+        rules,
+      },
+    );
+    if (preferResult.applied) {
+      pool = preferResult.pool;
+      debugPush?.({
+        stage: "filter",
+        action: "apply",
+        method: "prefer_non_totw_or_tots",
+        poolSize: pool.length,
+      });
+    }
+  }
 
-  squad = fillSquad(squad, pool, squadSize, lockedIds, {
-    uniqueMaxByAttr,
-    sameMaxByAttr,
-    predicateCaps,
-    ratingHint: ratingFillHint,
-  });
-  rebuildLockedIdsFromSquad(squad, lockedIds);
-  debugPush?.({
-    stage: "fill",
-    squadSize: squad.length,
-    lockedCount: lockedIds.size,
-  });
+  if (isPureRatingOnlySbc(rules, chemistryRequired)) {
+    squad = buildPureRatingOnlySquad(squad, pool, squadSize, lockedIds);
+    rebuildLockedIdsFromSquad(squad, lockedIds);
+    debugPush?.({
+      stage: "fill",
+      action: "exact_pure_rating",
+      squadSize: squad.length,
+      lockedCount: lockedIds.size,
+    });
+  } else {
+    // Soft-discourage specials: at equal rating, non-specials come first in pool ordering.
+    // This passively makes fill/swap prefer non-specials without blocking specials.
+    pool.sort((a, b) => {
+      const seedBiasDiff =
+        getSeedPoolBiasScore(a, contextSeed) -
+        getSeedPoolBiasScore(b, contextSeed);
+      if (seedBiasDiff !== 0) return seedBiasDiff;
+      const ra = toNumber(a?.rating) ?? 0;
+      const rb = toNumber(b?.rating) ?? 0;
+      if (ra !== rb) return ra - rb;
+      return (a?.isSpecial ? 1 : 0) - (b?.isSpecial ? 1 : 0);
+    });
+
+    squad = fillSquad(squad, pool, squadSize, lockedIds, {
+      uniqueMaxByAttr,
+      sameMaxByAttr,
+      predicateCaps,
+      ratingHint: ratingFillHint,
+    });
+    rebuildLockedIdsFromSquad(squad, lockedIds);
+    debugPush?.({
+      stage: "fill",
+      squadSize: squad.length,
+      lockedCount: lockedIds.size,
+    });
+  }
 
   const dedupeReplaced = enforceUniqueDefinitions(
     squad,

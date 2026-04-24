@@ -602,6 +602,7 @@
         cooldownMs: 0,
         profileKey: null,
         onTelemetry: null,
+        warmFirstPageThreshold: null,
       };
     }
     if (typeof delayConfig !== "object") {
@@ -612,6 +613,7 @@
         cooldownMs: 0,
         profileKey: null,
         onTelemetry: null,
+        warmFirstPageThreshold: null,
       };
     }
     return {
@@ -634,6 +636,11 @@
         typeof delayConfig.onTelemetry === "function"
           ? delayConfig.onTelemetry
           : null,
+      warmFirstPageThreshold: Number.isFinite(
+        Number(delayConfig.warmFirstPageThreshold),
+      )
+        ? Math.max(0, Number(delayConfig.warmFirstPageThreshold))
+        : null,
     };
   };
 
@@ -663,6 +670,7 @@
       ),
       adaptiveEscalated: false,
       delayAppliedMs: 0,
+      warmShortcut: false,
       effectiveDelaySecondsStart: effectiveDelaySeconds,
       effectiveDelaySecondsEnd: effectiveDelaySeconds,
     };
@@ -704,6 +712,14 @@
           ? data.endOfList
           : data.retrievedAll
         : true;
+      if (
+        telemetry.pages === 1 &&
+        cfg.warmFirstPageThreshold != null &&
+        pageItems.length > cfg.warmFirstPageThreshold
+      ) {
+        telemetry.warmShortcut = true;
+        break;
+      }
       offset += criteria.count ?? pageItems.length ?? 0;
       if (!pageItems.length) break;
       if (endOfList) break;
@@ -1487,6 +1503,7 @@
       safeDelaySeconds: lookupDelaySafeSeconds,
       cooldownMs: lookupDelayCooldownMs,
       profileKey: lookupDelayProfileKey,
+      warmFirstPageThreshold: 300,
       onTelemetry: (stats) => {
         if (!lookupTelemetry || typeof lookupTelemetry !== "object") return;
         lookupTelemetry.club = stats;
@@ -1542,6 +1559,7 @@
       safeDelaySeconds: lookupDelaySafeSeconds,
       cooldownMs: lookupDelayCooldownMs,
       profileKey: lookupDelayProfileKey,
+      warmFirstPageThreshold: 300,
       onTelemetry: (stats) => {
         if (!lookupTelemetry || typeof lookupTelemetry !== "object") return;
         lookupTelemetry.club = stats;
@@ -1740,12 +1758,153 @@
   const PLAYERS_FETCH_TTL_MS = 60 * 1000;
   const playersFetchInFlightByKey = new Map();
   const playersFetchCacheByKey = new Map(); // key -> { at, data }
+  const rawInventoryCache = {
+    club: null,
+    storage: null,
+    unassigned: null,
+    transfer: null,
+  };
+  const rawInventoryInFlight = {
+    club: null,
+    storage: null,
+    unassigned: null,
+    transfer: null,
+  };
+
+  const getRawInventoryStatus = () => {
+    const entries = [
+      rawInventoryCache.club,
+      rawInventoryCache.storage,
+      rawInventoryCache.unassigned,
+      rawInventoryCache.transfer,
+    ].filter(Boolean);
+    const cachedAgeMs = entries.length
+      ? Math.max(...entries.map((entry) => Date.now() - Number(entry?.at ?? 0)))
+      : null;
+    return {
+      cachedAgeMs,
+      inFlight: Object.values(rawInventoryInFlight).some(Boolean),
+    };
+  };
+
+  const clearRawInventoryCache = () => {
+    for (const key of Object.keys(rawInventoryCache)) {
+      rawInventoryCache[key] = null;
+    }
+    for (const key of Object.keys(rawInventoryInFlight)) {
+      rawInventoryInFlight[key] = null;
+    }
+  };
+
+  const ensureRawInventorySource = async (
+    source,
+    { force = false, ttlMs = PLAYERS_FETCH_TTL_MS } = {},
+  ) => {
+    const key = String(source ?? "");
+    if (!key) return [];
+    const cached = rawInventoryCache[key] ?? null;
+    if (!force && cached && Date.now() - cached.at < ttlMs) {
+      return cached.data;
+    }
+    const inFlight = rawInventoryInFlight[key] ?? null;
+    if (!force && inFlight) return inFlight;
+
+    const promise = (async () => {
+      let data = [];
+      switch (key) {
+        case "club":
+          data = await getClubItems({
+            ignoreLoaned: false,
+            excludeActiveSquad: false,
+            dedupe: true,
+            skipStats: true,
+          });
+          break;
+        case "storage":
+          data = await getStorageItems({});
+          break;
+        case "unassigned":
+          data = await getUnassignedItems({ refresh: true });
+          break;
+        case "transfer": {
+          const { unSoldItems, availableItems } = await getTransferListItems();
+          data = (unSoldItems ?? []).concat(availableItems ?? []);
+          break;
+        }
+        default:
+          data = [];
+      }
+      rawInventoryCache[key] = { at: Date.now(), data };
+      return data;
+    })().finally(() => {
+      rawInventoryInFlight[key] = null;
+    });
+
+    rawInventoryInFlight[key] = promise;
+    return promise;
+  };
+
+  const ensureRawInventorySnapshot = async ({
+    force = false,
+    ttlMs = PLAYERS_FETCH_TTL_MS,
+    includeUnassigned = false,
+    includeTransfer = false,
+  } = {}) => {
+    const [clubItems, storageItems, unassignedItems, transferItems] =
+      await Promise.all([
+        ensureRawInventorySource("club", { force, ttlMs }),
+        ensureRawInventorySource("storage", { force, ttlMs }),
+        includeUnassigned
+          ? ensureRawInventorySource("unassigned", { force, ttlMs })
+          : Promise.resolve([]),
+        includeTransfer
+          ? ensureRawInventorySource("transfer", { force, ttlMs })
+          : Promise.resolve([]),
+      ]);
+    const duplicateDefIds = buildDuplicateDefIdSet(
+      (unassignedItems ?? []).concat(transferItems ?? []),
+    );
+    return {
+      clubItems: Array.isArray(clubItems) ? clubItems : [],
+      storageItems: Array.isArray(storageItems) ? storageItems : [],
+      unassignedItems: Array.isArray(unassignedItems) ? unassignedItems : [],
+      transferItems: Array.isArray(transferItems) ? transferItems : [],
+      duplicateDefIds,
+    };
+  };
+
+  const normalizeDefinitionIdKeyList = (value) => {
+    const source =
+      value instanceof Set ? Array.from(value) : Array.isArray(value) ? value : [];
+    return Array.from(
+      new Set(
+        source
+          .map((entry) => (entry == null ? null : String(entry)))
+          .filter(Boolean),
+      ),
+    ).sort();
+  };
+
+  const buildValueCountMap = (values) => {
+    const source =
+      values instanceof Set ? Array.from(values) : Array.isArray(values) ? values : [];
+    const counts = new Map();
+    for (const value of source) {
+      if (value == null) continue;
+      const key = String(value);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  };
 
   const normalizePlayersFetchOptions = (options = {}) => ({
     ignoreLoaned: options?.ignoreLoaned !== false,
     onlyFemales: options?.onlyFemales === true,
     excludeActiveSquad: options?.excludeActiveSquad !== false,
     includeUnassigned: options?.includeUnassigned === true,
+    allowedActiveSquadDefIds: normalizeDefinitionIdKeyList(
+      options?.allowedActiveSquadDefIds,
+    ),
     onlyUntradables: options?.onlyUntradables === true,
     onlyTradables: options?.onlyTradables === true,
     playerId: options?.playerId ?? null,
@@ -1761,43 +1920,115 @@
     });
   };
 
-  const fetchPlayersSnapshot = async (options = {}) => {
+  const isRawPlayerUntradeable = (item) =>
+    typeof item?.isTradeable === "function"
+      ? !item.isTradeable()
+      : !item?.isTradeable;
+
+  const matchesRawPlayerSelection = (item, normalized = {}) => {
+    if (!item) return false;
+    const playerIds = Array.isArray(normalized?.playerIds)
+      ? normalized.playerIds
+      : [];
+    const hasPlayerIds = playerIds.length > 0;
+    const definitionId = item?.definitionId ?? null;
+    if (
+      hasPlayerIds &&
+      !playerIds.some(
+        (value) => value === definitionId || String(value) === String(definitionId),
+      )
+    ) {
+      return false;
+    }
+    if (
+      normalized?.playerId != null &&
+      String(definitionId) !== String(normalized.playerId)
+    ) {
+      return false;
+    }
+    return true;
+  };
+
+  const fetchPlayersSnapshot = async (options = {}, config = {}) => {
     const normalized = normalizePlayersFetchOptions(options);
     const includeUnassigned = normalized.includeUnassigned === true;
-    const unassignedItems = await getUnassignedItems({
-      refresh: includeUnassigned,
-    });
-    const duplicateDefIds = await getDuplicatedDefIds(true, {
-      refreshUnassigned: false,
-      unassignedItems,
-    });
-    const activeSquadDefIds =
-      includeUnassigned && normalized.excludeActiveSquad
-        ? new Set(await getActiveSquadPlayerIds())
+    const { clubItems, storageItems, unassignedItems, duplicateDefIds } =
+      await ensureRawInventorySnapshot({
+        force: config?.forceRaw === true,
+        ttlMs:
+          readNumeric(config?.ttlMs) ??
+          readNumeric(config?.sourceTtlMs) ??
+          PLAYERS_FETCH_TTL_MS,
+        includeUnassigned,
+        includeTransfer: false,
+      });
+    const allowedActiveSquadDefIds = new Set(
+      normalized?.allowedActiveSquadDefIds ?? [],
+    );
+    const activeSquadDefCounts =
+      normalized.excludeActiveSquad
+        ? buildValueCountMap(await getActiveSquadPlayerIds())
         : null;
-    const clubFetchOptions = {
-      ...normalized,
-      duplicateDefIds,
-      excludeActiveSquad:
-        activeSquadDefIds instanceof Set ? false : normalized.excludeActiveSquad,
-    };
-    const [rawClubPlayers, rawStoragePlayers, rawUnassignedPlayers] =
-      await Promise.all([
-        getClubPlayers(clubFetchOptions),
-      getStoragePlayers(duplicateDefIds),
-        includeUnassigned
-          ? Promise.resolve(
-              (unassignedItems ?? [])
-                .filter((player) => !player?.isEnrolledInAcademy?.())
-                .map((player) =>
-                  toPlainPlayer(player, {
-                    duplicateDefIds,
-                    source: "unassigned",
-                  }),
-                ),
-            )
-          : Promise.resolve([]),
-      ]);
+    const activeSquadExcludeBudget = activeSquadDefCounts
+      ? (() => {
+          const budget = new Map(activeSquadDefCounts);
+          const allowedReuseCounts = buildValueCountMap(
+            normalized?.allowedActiveSquadDefIds ?? [],
+          );
+          for (const [defKey, allowedCount] of allowedReuseCounts.entries()) {
+            const activeCount = budget.get(defKey) ?? 0;
+            if (activeCount <= 0) continue;
+            const remaining = Math.max(0, activeCount - allowedCount);
+            if (remaining > 0) budget.set(defKey, remaining);
+            else budget.delete(defKey);
+          }
+          return budget;
+        })()
+      : null;
+    const rawClubPlayers = (clubItems ?? [])
+      .filter((player) => matchesRawPlayerSelection(player, normalized))
+      .filter((player) => {
+        if (normalized?.ignoreLoaned !== false && player?.isLimitedUse?.()) {
+          return false;
+        }
+        if (
+          normalized?.onlyFemales === true &&
+          player?.gender !== GrammaticalGender.FEMININE
+        ) {
+          return false;
+        }
+        if (
+          normalized?.onlyUntradables === true &&
+          !isRawPlayerUntradeable(player)
+        ) {
+          return false;
+        }
+        if (
+          normalized?.onlyTradables === true &&
+          isRawPlayerUntradeable(player)
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .map((player) => toPlainPlayer(player, { duplicateDefIds, source: "club" }));
+    const rawStoragePlayers = (storageItems ?? [])
+      .filter((player) => matchesRawPlayerSelection(player, normalized))
+      .filter((player) => !player?.isEnrolledInAcademy?.())
+      .map((player) =>
+        toPlainPlayer(player, { duplicateDefIds, source: "storage" }),
+      );
+    const rawUnassignedPlayers = includeUnassigned
+      ? (unassignedItems ?? [])
+          .filter((player) => matchesRawPlayerSelection(player, normalized))
+          .filter((player) => !player?.isEnrolledInAcademy?.())
+          .map((player) =>
+            toPlainPlayer(player, {
+              duplicateDefIds,
+              source: "unassigned",
+            }),
+          )
+      : [];
     const storageDefIds = new Set(
       (rawStoragePlayers ?? [])
         .map((player) => player?.definitionId ?? null)
@@ -1811,13 +2042,17 @@
     const clubPlayers = (rawClubPlayers ?? [])
       .map((player) => {
         const defId = player?.definitionId ?? null;
+        const defKey = defId == null ? null : String(defId);
         const isActiveSquadDef =
           defId != null &&
-          activeSquadDefIds instanceof Set &&
-          (activeSquadDefIds.has(defId) || activeSquadDefIds.has(String(defId)));
+          activeSquadDefCounts instanceof Map &&
+          (activeSquadDefCounts.get(defKey) ?? 0) > 0;
+        const allowActiveSquadReuse =
+          defKey != null && allowedActiveSquadDefIds.has(defKey);
         return {
         ...player,
         isActiveSquadDef,
+        allowActiveSquadReuse,
         hasStorageDuplicate:
           defId != null &&
           (storageDefIds.has(defId) || storageDefIds.has(String(defId))),
@@ -1827,10 +2062,13 @@
       .filter((player) => {
         if (!player?.isActiveSquadDef) return true;
         const defId = player?.definitionId ?? null;
-        return (
-          defId != null &&
-          (duplicateDefIds.has(defId) || duplicateDefIds.has(String(defId)))
-        );
+        const defKey = defId == null ? null : String(defId);
+        if (!defKey || !(activeSquadExcludeBudget instanceof Map)) return true;
+        const remaining = activeSquadExcludeBudget.get(defKey) ?? 0;
+        if (remaining <= 0) return true;
+        if (remaining === 1) activeSquadExcludeBudget.delete(defKey);
+        else activeSquadExcludeBudget.set(defKey, remaining - 1);
+        return false;
       });
     const storagePlayers = (rawStoragePlayers ?? []).map((player) => {
       const defId = player?.definitionId ?? null;
@@ -1885,7 +2123,10 @@
     }
 
     const promise = (async () => {
-      const data = await fetchPlayersSnapshot(options);
+      const data = await fetchPlayersSnapshot(options, {
+        forceRaw: force,
+        ttlMs,
+      });
       playersFetchCacheByKey.set(key, { at: Date.now(), data });
       return data;
     })().finally(() => {
@@ -1902,6 +2143,7 @@
   } = {}) => {
     playersFetchInFlightByKey.clear();
     playersFetchCacheByKey.clear();
+    clearRawInventoryCache();
     activeSquadDefIdsCache = null;
     if (clearWarmLookup) recentApplyLookupCache = null;
     if (bumpRevision) playersFetchCacheRevision += 1;
@@ -1910,12 +2152,15 @@
   const getPlayersSnapshotStatus = (options = {}) => {
     const key = getPlayersFetchKey(options);
     const cached = playersFetchCacheByKey.get(key) ?? null;
+    const rawStatus = getRawInventoryStatus();
     return {
       key,
       revision: Number(playersFetchCacheRevision ?? 0),
       inFlight: playersFetchInFlightByKey.has(key),
       cachedAt: cached ? new Date(cached.at).toISOString() : null,
       cachedAgeMs: cached ? Date.now() - cached.at : null,
+      rawInFlight: Boolean(rawStatus?.inFlight),
+      rawCachedAgeMs: rawStatus?.cachedAgeMs ?? null,
     };
   };
 
@@ -2556,6 +2801,16 @@
         null;
       return Boolean(player?.isUnassigned || player?.isDuplicate);
     });
+    const usesActiveSquadLookup = (ids || []).some((id) => {
+      const key = String(id);
+      const player =
+        playerById?.get?.(key) ??
+        playerById?.get?.(id) ??
+        playerById?.[key] ??
+        playerById?.[id] ??
+        null;
+      return Boolean(player?.isActiveSquadDef);
+    });
     const withPerf = async (msKey, countKey, fn) => {
       const startedAt = Date.now();
       try {
@@ -2578,7 +2833,8 @@
       }),
       includeUnassigned: usesUnassignedLookup,
       refreshUnassigned: usesUnassignedLookup,
-      excludeActiveSquad: usesUnassignedLookup ? false : true,
+      excludeActiveSquad:
+        usesUnassignedLookup || usesActiveSquadLookup ? false : true,
     };
     let cachedLookup = null;
     let lookupFetchCount = 0;
@@ -3518,12 +3774,23 @@
         null;
       return Boolean(player?.isUnassigned || player?.isDuplicate);
     });
+    const usesActiveSquadLookup = ids.some((id) => {
+      const key = String(id);
+      const player =
+        playerById?.get?.(key) ??
+        playerById?.get?.(id) ??
+        playerById?.[key] ??
+        playerById?.[id] ??
+        null;
+      return Boolean(player?.isActiveSquadDef);
+    });
     const warmLookup = readWarmApplyLookup(lookupKey, ids);
     const lookupOptions = {
       ...createApplyLookupOptions(),
       includeUnassigned: usesUnassignedLookup,
       refreshUnassigned: usesUnassignedLookup,
-      excludeActiveSquad: usesUnassignedLookup ? false : true,
+      excludeActiveSquad:
+        usesUnassignedLookup || usesActiveSquadLookup ? false : true,
     };
     let targetedLookup = null;
     if (!warmLookup) {
@@ -3536,7 +3803,8 @@
             ...createTargetedApplyLookupOptions(),
             includeUnassigned: usesUnassignedLookup,
             refreshUnassigned: usesUnassignedLookup,
-            excludeActiveSquad: usesUnassignedLookup ? false : true,
+            excludeActiveSquad:
+              usesUnassignedLookup || usesActiveSquadLookup ? false : true,
           },
         );
       } catch (error) {
@@ -17747,7 +18015,7 @@
         const payload = await window.eaData.getSolverPayload(
           {
             ignoreLoaned: true,
-            preferWarmSnapshot: true,
+            preferWarmSnapshot: false,
             includeUnassigned,
           },
           allSetIds,
@@ -25429,16 +25697,22 @@
       };
     },
     getSolverPayload: async (options = {}, setIds = []) => {
+      const currentChallengeDefIds = currentChallenge
+        ? Array.from(getChallengeSquadDefinitionIds(currentChallenge))
+        : [];
       const solverOptions = {
         ...options,
         excludeActiveSquad: options?.excludeActiveSquad ?? true,
+        allowedActiveSquadDefIds:
+          options?.allowedActiveSquadDefIds ?? currentChallengeDefIds,
       };
-      const preferWarmSnapshot = options?.preferWarmSnapshot !== false;
+      const preferWarmSnapshot = options?.preferWarmSnapshot === true;
       const forcePlayersFetch =
         options?.forcePlayersFetch === true ||
         options?.forcePlayers === true ||
         options?.forceFetch === true ||
-        options?.force === true;
+        options?.force === true ||
+        !preferWarmSnapshot;
       const warmSnapshotReuseMs = Math.max(
         0,
         readNumeric(options?.warmSnapshotReuseMs) ?? 15000,
@@ -25448,11 +25722,16 @@
         preferWarmSnapshot &&
         snapshotStatus?.cachedAgeMs != null &&
         snapshotStatus.cachedAgeMs <= warmSnapshotReuseMs;
-      const playerSnapshotSource = canReuseWarmSnapshot
+      const hasWarmRawInventory =
+        preferWarmSnapshot &&
+        snapshotStatus?.rawCachedAgeMs != null &&
+        snapshotStatus.rawCachedAgeMs <= warmSnapshotReuseMs;
+      const playerSnapshotSource = canReuseWarmSnapshot || hasWarmRawInventory
         ? "warm-cache"
-        : snapshotStatus?.inFlight
+        : snapshotStatus?.inFlight || snapshotStatus?.rawInFlight
           ? "in-flight"
-          : snapshotStatus?.cachedAgeMs != null
+          : snapshotStatus?.cachedAgeMs != null ||
+              snapshotStatus?.rawCachedAgeMs != null
             ? "stale-refresh"
             : "fresh-fetch";
       if (forcePlayersFetch && canReuseWarmSnapshot) {
@@ -25467,6 +25746,8 @@
         preferWarmSnapshot,
         cachedAgeMs: snapshotStatus?.cachedAgeMs ?? null,
         inFlight: Boolean(snapshotStatus?.inFlight),
+        rawCachedAgeMs: snapshotStatus?.rawCachedAgeMs ?? null,
+        rawInFlight: Boolean(snapshotStatus?.rawInFlight),
         revision: snapshotStatus?.revision ?? null,
       });
       const {
@@ -25552,6 +25833,72 @@
           onlyUntradeables: false,
           onlyStorage: false,
           excludedPlayerIds: excludedStorageIds,
+        },
+      };
+    },
+    captureSolverFixture: async (options = {}) => {
+      const challengeId = currentChallenge?.id ?? null;
+      let solverSettings = null;
+      try {
+        solverSettings = await getSolverSettingsForChallenge(challengeId);
+      } catch {
+        solverSettings = getDefaultSolverSettings();
+      }
+
+      const payload = await window.eaData.getSolverPayload({
+        ignoreLoaned: true,
+        forcePlayersFetch: options?.forcePlayersFetch !== false,
+        preferWarmSnapshot: options?.preferWarmSnapshot === true,
+        includeUnassigned: Boolean(solverSettings?.useUnassigned),
+      });
+
+      const requiredIds = new Set();
+      try {
+        const slots = Array.isArray(payload?.squadSlots) ? payload.squadSlots : [];
+        for (const slot of slots) {
+          const item = slot?.item ?? null;
+          const id = item?.id ?? null;
+          const concept = Boolean(item?.concept);
+          if (id && id !== 0 && !concept) requiredIds.add(String(id));
+        }
+      } catch {}
+
+      const allPlayers = Array.isArray(payload?.players) ? payload.players : [];
+      const { filteredPlayers, poolFilters } = filterPlayersBySolverPoolSettings(
+        allPlayers,
+        solverSettings,
+        { requiredIds },
+      );
+
+      return {
+        snapshotVersion: "0.2.0",
+        source: "ea-data-live-capture",
+        capturedAt: new Date().toISOString(),
+        challengeId,
+        setId: currentChallenge?.setId ?? null,
+        challengeName: currentChallenge?.name ?? null,
+        squadSize:
+          readNumeric(payload?.requiredPlayers) ??
+          (Array.isArray(payload?.squadSlots) ? payload.squadSlots.length : 0) ??
+          null,
+        squadSlots: Array.isArray(payload?.squadSlots) ? payload.squadSlots : [],
+        requirementsNormalized: Array.isArray(
+          payload?.openChallenge?.requirementsNormalized,
+        )
+          ? payload.openChallenge.requirementsNormalized
+          : [],
+        solverSettings:
+          solverSettings && typeof solverSettings === "object"
+            ? normalizeSolverSettingsInput(solverSettings)
+            : getDefaultSolverSettings(),
+        rawPlayers: allPlayers,
+        filteredPlayers,
+        poolFilters,
+        payloadMeta: {
+          formationName: payload?.formationName ?? null,
+          requiredPlayers: payload?.requiredPlayers ?? null,
+          slotCount: payload?.slotCount ?? null,
+          cacheRevision: payload?._cacheRevision ?? null,
         },
       };
     },
