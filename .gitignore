@@ -31,3 +31,6 @@ RUN-AFTER-LLM_EAFC-SBC-Reference-Workspace/
 
 backup-project.ps1
 AGENT.md
+
+# Live fixture exports
+/ea-data-live-fixture-*.json
