@@ -4560,6 +4560,9 @@ const evaluateRule = (rule, squad, squadSize, evalCtx) => {
     rule.type === "player_rarity_or_totw" ||
     rule.type === "player_tradability" ||
     rule.type === "first_owner_players_count" ||
+    rule.type === "loan_players" ||
+    rule.type === "player_min_ovr" ||
+    rule.type === "player_max_ovr" ||
     rule.type === "player_exact_ovr" ||
     rule.type === "player_inform"
   ) {

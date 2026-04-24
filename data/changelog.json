@@ -12,6 +12,16 @@
       ]
     },
     {
+      "version": "1.9.1",
+      "date": "2026-04-19",
+      "headline": "TOTS solver fix",
+      "summary": "Improved solver logic to recognise TOTS requirements and club players.",
+      "details": [
+        "Improved solver logic to recognise TOTS requirements and club players.",
+        "Added a button to quickly view the extensions source code in the global settings menu."
+      ]
+    },
+    {
       "version": "1.9",
       "date": "2026-04-18",
       "headline": "Solver and player pool fixes",

@@ -4694,6 +4694,51 @@
     };
   };
 
+  const hasUsableChallengeSlotInfo = (slotInfo) => {
+    if (!slotInfo || typeof slotInfo !== "object") return false;
+    if (Array.isArray(slotInfo?.squadSlots) && slotInfo.squadSlots.length > 0) {
+      return true;
+    }
+    const slotCount = readNumeric(slotInfo?.slotCount);
+    if (slotCount != null && Number(slotCount) > 0) return true;
+    const requiredPlayers = readNumeric(slotInfo?.requiredPlayers);
+    if (requiredPlayers != null && Number(requiredPlayers) > 0) return true;
+    return Boolean(slotInfo?.formationName);
+  };
+
+  const resolveChallengeSlotsSnapshot = async (
+    challenge,
+    { source = "unknown", forceLoadWhenMissing = true, logResult = false } = {},
+  ) => {
+    let loaded = null;
+    let slotInfo = buildChallengeSlotsForSolver(challenge, null);
+    let slotSource = "local";
+    if (
+      !hasUsableChallengeSlotInfo(slotInfo) &&
+      challenge &&
+      forceLoadWhenMissing
+    ) {
+      loaded = await loadChallenge(challenge, true, { force: true });
+      slotInfo = buildChallengeSlotsForSolver(challenge, loaded?.data ?? loaded);
+      slotSource = "loaded";
+    }
+    if (logResult) {
+      log("debug", "[EA Data] Challenge snapshot", {
+        source,
+        challengeId: challenge?.id ?? null,
+        setId: challenge?.setId ?? null,
+        slotSource,
+        slotCount: slotInfo?.slotCount ?? 0,
+        squadSlots: Array.isArray(slotInfo?.squadSlots)
+          ? slotInfo.squadSlots.length
+          : 0,
+        requiredPlayers: slotInfo?.requiredPlayers ?? null,
+        formationName: slotInfo?.formationName ?? null,
+      });
+    }
+    return { loaded, slotInfo, slotSource };
+  };
+
   let sbcPanelHooked = false;
   let sbcOverviewHooked = false;
   let sbcChallengesHooked = false;
@@ -23142,6 +23187,30 @@
     };
   };
 
+  const buildAutoFetchPlayersFetchOptions = (request) => {
+    const base = {
+      ignoreLoaned: true,
+      includeChallenges: false,
+    };
+    const reason = String(request?.reason ?? "unknown");
+    if (reason !== "challenge-open") return base;
+    const challengeId =
+      readNumeric(request?.challengeId) ?? readNumeric(currentChallenge?.id);
+    let solverSettings = getDefaultSolverSettings();
+    try {
+      const cachedPrefs = preferencesCache?.value ?? null;
+      if (cachedPrefs) {
+        solverSettings = resolveSolverSettingsFromPreferences(cachedPrefs, {
+          challengeId,
+        });
+      }
+    } catch {}
+    return {
+      ...base,
+      includeUnassigned: Boolean(solverSettings?.useUnassigned),
+    };
+  };
+
   const hasRecentAutoFetchActivity = (
     maxAgeMs = AUTO_FETCH_RECENT_GLOBAL_WARM_MS,
   ) => {
@@ -23205,20 +23274,20 @@
       }
       autoFetchInFlight = true;
       autoFetchLastStartedAt = Date.now();
+      const fetchOptions = buildAutoFetchPlayersFetchOptions(request);
       log("debug", "[EA Data] Auto-fetch started", {
         reason: request?.reason ?? "unknown",
         source: request?.source ?? null,
         setId: request?.setId ?? null,
         challengeId: request?.challengeId ?? null,
+        includeUnassigned: Boolean(fetchOptions?.includeUnassigned),
         queued: true,
       });
-      Promise.resolve()
-        .then(() =>
-          window.eaData.triggerFetch(
-            { ignoreLoaned: true, includeChallenges: false },
-            request?.setId != null ? [request.setId] : [],
-            { silent: true },
-          ),
+      window.eaData
+        .triggerFetch(
+          fetchOptions,
+          request?.setId != null ? [request.setId] : [],
+          { silent: true },
         )
         .then((data) => {
           markAutoFetchRequestCompleted(request);
@@ -23320,21 +23389,21 @@
     markAutoFetchRequestAccepted(request);
     autoFetchInFlight = true;
     autoFetchLastStartedAt = Date.now();
+    const fetchOptions = buildAutoFetchPlayersFetchOptions(request);
     log("debug", "[EA Data] Auto-fetch started", {
       reason: request?.reason ?? "unknown",
       source: request?.source ?? null,
       setId: request?.setId ?? null,
       challengeId: request?.challengeId ?? null,
+      includeUnassigned: Boolean(fetchOptions?.includeUnassigned),
     });
-    Promise.resolve()
-      .then(() =>
-        window.eaData.triggerFetch(
-          { ignoreLoaned: true, includeChallenges: false },
-          request?.setId != null ? [request.setId] : [],
-          {
-            silent: true,
-          },
-        ),
+    window.eaData
+      .triggerFetch(
+        fetchOptions,
+        request?.setId != null ? [request.setId] : [],
+        {
+          silent: true,
+        },
       )
       .then((data) => {
         markAutoFetchRequestCompleted(request);
@@ -25240,23 +25309,15 @@
     },
     getOpenChallengeSlots: async () => {
       if (!currentChallenge) return null;
-      const loaded = await loadChallenge(currentChallenge, true, {
-        force: true,
+      const { slotInfo } = await resolveChallengeSlotsSnapshot(currentChallenge, {
+        source: "getOpenChallengeSlots",
+        logResult: true,
       });
       const squad =
         currentChallenge?.squad ??
-        loaded?.data?.squad ??
-        loaded?.squad ??
         (typeof currentChallenge?.getSquad === "function"
           ? currentChallenge.getSquad()
           : null);
-
-      const formationName =
-        squad?.getFormation?.()?.name ?? squad?.formation?.name ?? null;
-      const requiredPlayers =
-        typeof squad?.getNumOfRequiredPlayers === "function"
-          ? squad.getNumOfRequiredPlayers()
-          : null;
 
       const slots = squad?.getPlayers?.() ?? [];
       const fieldPlayers = squad?.getFieldPlayers?.() ?? [];
@@ -25355,9 +25416,9 @@
       return {
         challengeId: currentChallenge.id,
         setId: currentChallenge.setId,
-        formationName,
-        requiredPlayers,
-        slotCount: Array.isArray(slots) ? slots.length : 0,
+        formationName: slotInfo?.formationName ?? null,
+        requiredPlayers: slotInfo?.requiredPlayers ?? null,
+        slotCount: slotInfo?.slotCount ?? (Array.isArray(slots) ? slots.length : 0),
         fieldPlayersCount: Array.isArray(fieldPlayers)
           ? fieldPlayers.length
           : 0,
@@ -25387,12 +25448,27 @@
         preferWarmSnapshot &&
         snapshotStatus?.cachedAgeMs != null &&
         snapshotStatus.cachedAgeMs <= warmSnapshotReuseMs;
+      const playerSnapshotSource = canReuseWarmSnapshot
+        ? "warm-cache"
+        : snapshotStatus?.inFlight
+          ? "in-flight"
+          : snapshotStatus?.cachedAgeMs != null
+            ? "stale-refresh"
+            : "fresh-fetch";
       if (forcePlayersFetch && canReuseWarmSnapshot) {
         log("debug", "[EA Data] Solver payload reusing warm players snapshot", {
           cachedAgeMs: snapshotStatus?.cachedAgeMs ?? null,
           warmSnapshotReuseMs,
         });
       }
+      log("debug", "[EA Data] Solver payload players snapshot", {
+        source: playerSnapshotSource,
+        forcePlayersFetch,
+        preferWarmSnapshot,
+        cachedAgeMs: snapshotStatus?.cachedAgeMs ?? null,
+        inFlight: Boolean(snapshotStatus?.inFlight),
+        revision: snapshotStatus?.revision ?? null,
+      });
       const {
         clubPlayers,
         storagePlayers,
@@ -25428,90 +25504,19 @@
       let squadSlots = [];
       if (currentChallenge) {
         try {
-          const loaded = await loadChallenge(currentChallenge, true, {
-            force: true,
-          });
-          const squad =
-            currentChallenge?.squad ??
-            loaded?.data?.squad ??
-            loaded?.squad ??
-            (typeof currentChallenge?.getSquad === "function"
-              ? currentChallenge.getSquad()
-              : null);
-          formationName =
-            squad?.getFormation?.()?.name ?? squad?.formation?.name ?? null;
-          requiredPlayers =
-            typeof squad?.getNumOfRequiredPlayers === "function"
-              ? squad.getNumOfRequiredPlayers()
-              : null;
-          const slots = squad?.getPlayers?.() ?? [];
-          slotCount = Array.isArray(slots) ? slots.length : 0;
-
-          const normalizeSlotForSolver = (slot, index) => {
-            const item = resolveSlotItem(slot);
-            const concept =
-              typeof item?.isConcept === "function"
-                ? item.isConcept()
-                : Boolean(item?.concept);
-            const positionObj = slot?.position ?? null;
-            const positionTypeName =
-              positionObj?.typeName ??
-              positionObj?.name ??
-              positionObj?.label ??
-              null;
-            const resolved = resolveSlotPosition(slot);
-            const resolvedName =
-              typeof resolved === "string"
-                ? resolved
-                : typeof resolved === "object"
-                  ? (resolved?.typeName ??
-                    resolved?.name ??
-                    resolved?.label ??
-                    null)
-                  : null;
-            const positionName = positionTypeName ?? resolvedName ?? null;
-
-            return {
-              slotIndex: index,
-              positionName,
-              isLocked: resolveSlotLocked(slot),
-              isEditable:
-                typeof slot?.isEditable === "function"
-                  ? slot.isEditable()
-                  : typeof slot?.isEditable === "boolean"
-                    ? slot.isEditable
-                    : null,
-              isBrick: resolveSlotBrick(slot),
-              isValid: resolveSlotValid(slot, item),
-              item: item
-                ? {
-                    id: item?.id ?? null,
-                    definitionId: item?.definitionId ?? null,
-                    concept,
-                  }
-                : null,
-            };
-          };
-
-          const normalizedSlots = Array.isArray(slots)
-            ? slots.map(normalizeSlotForSolver)
-            : [];
-          const fieldSlots = normalizedSlots.filter(
-            (slot) => Boolean(slot?.positionName) && slot?.isBrick !== true,
+          const { slotInfo } = await resolveChallengeSlotsSnapshot(
+            currentChallenge,
+            {
+              source: "getSolverPayload",
+              logResult: true,
+            },
           );
-          const take =
-            typeof requiredPlayers === "number" && requiredPlayers > 0
-              ? requiredPlayers
-              : 11;
-          squadSlots = fieldSlots.slice(0, take).map((slot) => ({
-            slotIndex: slot.slotIndex,
-            positionName: slot.positionName,
-            isLocked: slot.isLocked,
-            isEditable: slot.isEditable,
-            isBrick: slot.isBrick,
-            isValid: slot.isValid,
-            item: slot.item,
-          }));
+          formationName = slotInfo?.formationName ?? null;
+          requiredPlayers = slotInfo?.requiredPlayers ?? null;
+          slotCount = slotInfo?.slotCount ?? 0;
+          squadSlots = Array.isArray(slotInfo?.squadSlots)
+            ? slotInfo.squadSlots
+            : [];
         } catch {}
       }
       const sbcChallenges = setIds?.length
