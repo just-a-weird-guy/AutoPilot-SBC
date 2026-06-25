@@ -8,8 +8,24 @@
 .ea-data-preview-nav-btn,
 .ea-data-times-stepper__btn,
 .ea-data-times-stepper__input,
-.ea-data-topbar-support-btn {
+.ea-data-topbar-support-btn,
+.ea-data-solve-button,
+.ea-data-setsolve-button,
+.ea-data-sequence-entry-button,
+.ea-data-challenge-card,
+.ea-data-solution-summary,
+.ea-data-sequence-step-summary,
+.ea-data-excluded-leagues-option,
+.ea-data-excluded-item,
+.ea-data-excluded-remove,
+.ea-data-excluded-league-chip-remove,
+.ea-data-card-bucket,
+.ea-data-sequence-tab,
+.ea-data-toast,
+.ea-data-toast__close {
   font-family: "Segoe UI", Arial, sans-serif !important;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .ea-data-range__number::-webkit-inner-spin-button,
 .ea-data-range__number::-webkit-outer-spin-button,

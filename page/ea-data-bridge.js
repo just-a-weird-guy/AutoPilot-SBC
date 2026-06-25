@@ -8,6 +8,77 @@
     SETS: "EA_DATA_GET_SBC_SETS",
   };
   const RES = "EA_DATA_RESPONSE";
+
+  const TAP_SELECTOR =
+    "button, [data-action], [data-local-kind-toggle], [data-step-toggle-id], " +
+    "[data-plan-delete], [data-sequence-mode-action], [data-sequence-submit-action], " +
+    "[data-sequence-used-action], .ea-data-challenge-card, .ea-data-solution-summary, " +
+    ".ea-data-sequence-step-summary, .ea-data-excluded-leagues-option, " +
+    ".ea-data-excluded-item, .ea-data-card-bucket, .ea-data-sequence-tab, " +
+    ".ea-data-times-stepper__btn, .ea-data-toast, .ea-data-toast__close";
+
+  const TAP_THRESHOLD_PX = 10;
+  let tapStartX = 0;
+  let tapStartY = 0;
+  let tapMoved = false;
+  let lastTapTime = 0;
+  let lastTapEl = null;
+
+  document.addEventListener(
+    "touchstart",
+    (event) => {
+      const touch = event?.touches?.[0];
+      if (!touch) return;
+      tapStartX = touch.clientX;
+      tapStartY = touch.clientY;
+      tapMoved = false;
+    },
+    { capture: true, passive: true },
+  );
+
+  document.addEventListener(
+    "touchmove",
+    (event) => {
+      const touch = event?.touches?.[0];
+      if (!touch) return;
+      const dx = touch.clientX - tapStartX;
+      const dy = touch.clientY - tapStartY;
+      if (dx * dx + dy * dy > TAP_THRESHOLD_PX * TAP_THRESHOLD_PX) {
+        tapMoved = true;
+      }
+    },
+    { capture: true, passive: true },
+  );
+
+  document.addEventListener(
+    "touchend",
+    (event) => {
+      if (tapMoved) return;
+      const target = event?.target;
+      if (!(target instanceof Element)) return;
+      const el = target.closest(TAP_SELECTOR);
+      if (!el) return;
+      if (el.disabled) return;
+      const now = Date.now();
+      if (lastTapEl === el && now - lastTapTime < 500) return;
+      lastTapEl = el;
+      lastTapTime = now;
+      try {
+        event.preventDefault();
+      } catch {}
+      try {
+        el.dispatchEvent(
+          new MouseEvent("click", {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+          }),
+        );
+      } catch {}
+    },
+    { capture: true, passive: false },
+  );
+
   const LOCAL_EXCLUSION_FIELDS = Object.freeze([
     "allowedGlobalLeagueIds",
     "allowedGlobalNationIds",
