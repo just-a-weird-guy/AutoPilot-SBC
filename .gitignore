@@ -36,3 +36,6 @@ AGENT.md
 
 # Live fixture exports
 /ea-data-live-fixture-*.json
+.planning
+tests
+package.json

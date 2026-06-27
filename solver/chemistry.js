@@ -24,16 +24,6 @@ const pointsForCount = (count, t1, t2, t3) => {
   return 0;
 };
 
-const countByAttr = (players, attr) => {
-  const counts = new Map();
-  for (const player of players || []) {
-    const value = player?.[attr];
-    if (value == null) continue;
-    counts.set(value, (counts.get(value) || 0) + 1);
-  }
-  return counts;
-};
-
 const getPlayablePositionNames = (player) => {
   const alt = Array.isArray(player?.alternativePositionNames)
     ? player.alternativePositionNames
@@ -46,6 +36,20 @@ const getPlayablePositionNames = (player) => {
   return [];
 };
 
+const isIconPlayer = (player) => {
+  const rarity = player?.rarityName;
+  if (typeof rarity === "string" && rarity.toLowerCase().includes("icon"))
+    return true;
+  return false;
+};
+
+const isHeroPlayer = (player) => {
+  const rarity = player?.rarityName;
+  if (typeof rarity === "string" && rarity.toLowerCase().includes("hero"))
+    return true;
+  return false;
+};
+
 const computeChemistryFromMask = (players, mask) => {
   const list = Array.isArray(players) ? players : [];
   const n = list.length;
@@ -55,9 +59,70 @@ const computeChemistryFromMask = (players, mask) => {
     if (mask & (1 << i)) included.push(list[i]);
   }
 
-  const byClub = countByAttr(included, "teamId");
-  const byLeague = countByAttr(included, "leagueId");
-  const byNation = countByAttr(included, "nationId");
+  // Count icons and heroes in the on-position subset.
+  let iconCount = 0;
+  let heroCount = 0;
+  for (const player of included) {
+    if (isIconPlayer(player)) iconCount += 1;
+    else if (isHeroPlayer(player)) heroCount += 1;
+  }
+
+  // Club counts: icons and heroes are excluded from club chemistry.
+  const byClub = new Map();
+  for (const player of included) {
+    if (isIconPlayer(player) || isHeroPlayer(player)) continue;
+    const value = player?.teamId;
+    if (value == null) continue;
+    byClub.set(value, (byClub.get(value) || 0) + 1);
+  }
+
+  // League counts: heroes count 2x in their own league, icons add +1 to every league.
+  const byLeague = new Map();
+  for (const player of included) {
+    if (isIconPlayer(player)) {
+      const value = player?.leagueId;
+      if (value == null) continue;
+      byLeague.set(value, (byLeague.get(value) || 0) + 1);
+    } else if (isHeroPlayer(player)) {
+      const value = player?.leagueId;
+      if (value == null) continue;
+      byLeague.set(value, (byLeague.get(value) || 0) + 2);
+    } else {
+      const value = player?.leagueId;
+      if (value == null) continue;
+      byLeague.set(value, (byLeague.get(value) || 0) + 1);
+    }
+  }
+  // Icons boost every league by 1 each.
+  if (iconCount > 0) {
+    for (const [key, val] of byLeague) {
+      byLeague.set(key, val + iconCount);
+    }
+  }
+
+  // Nation counts: icons count 2x in their own nation, heroes add +1 to every nation.
+  const byNation = new Map();
+  for (const player of included) {
+    if (isHeroPlayer(player)) {
+      const value = player?.nationId;
+      if (value == null) continue;
+      byNation.set(value, (byNation.get(value) || 0) + 1);
+    } else if (isIconPlayer(player)) {
+      const value = player?.nationId;
+      if (value == null) continue;
+      byNation.set(value, (byNation.get(value) || 0) + 2);
+    } else {
+      const value = player?.nationId;
+      if (value == null) continue;
+      byNation.set(value, (byNation.get(value) || 0) + 1);
+    }
+  }
+  // Heroes boost every nation by 1 each.
+  if (heroCount > 0) {
+    for (const [key, val] of byNation) {
+      byNation.set(key, val + heroCount);
+    }
+  }
 
   // FC24/25 SBC chemistry thresholds (0-3 per dimension, sum capped at 3).
   const perPlayerChem = new Array(n).fill(0);
@@ -67,6 +132,14 @@ const computeChemistryFromMask = (players, mask) => {
   for (let i = 0; i < n; i += 1) {
     if (!(mask & (1 << i))) continue;
     const player = list[i];
+
+    // Icons and Heroes always get chem = 3 when on-position.
+    if (isIconPlayer(player) || isHeroPlayer(player)) {
+      perPlayerChem[i] = 3;
+      totalChem += 3;
+      continue;
+    }
+
     const clubCount = byClub.get(player?.teamId) || 0;
     const leagueCount = byLeague.get(player?.leagueId) || 0;
     const nationCount = byNation.get(player?.nationId) || 0;
